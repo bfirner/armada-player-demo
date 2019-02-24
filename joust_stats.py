@@ -4,6 +4,7 @@
 # No maneuvering is taken into account.
 
 import csv
+import numpy
 import random
 
 import ship
@@ -54,35 +55,28 @@ for ship_name_a in ship_templates:
     ship_a = ship.Ship(name=ship_name_a, template=ship_templates[ship_name_a], upgrades=[])
     for ship_name_b in ship_templates:
         for distance in ["long", "medium", "short"]:
-            # Reset ship b for each distane
-            ship_b = ship.Ship(name=ship_name_b, template=ship_templates[ship_name_b], upgrades=[])
-            print("{} vs {} at distance {}".format(ship_name_a, ship_name_b, distance))
-            a_colors, a_roll = ship_a.roll("front", distance)
-            b_colors, b_roll = ship_b.roll("front", distance)
-            #print("Ship a rolls:")
-            #print_roll(a_colors, a_roll)
-            #print("For {} damage.".format(ArmadaDice.pool_damage(a_roll)))
-            ship_b.damage("front", ArmadaDice.pool_damage(a_roll))
             # Make sure we are actually rolling dice
+            a_colors, a_roll = ship_a.roll("front", distance)
             if 0 < len(a_colors):
-                num_rolls = 1
-                while 0 < ship_b.hull():
-                    num_rolls += 1
-                    a_colors, a_roll = ship_a.roll("front", distance)
-                    #print("Ship a rolls:")
-                    #print_roll(a_colors, a_roll)
-                    #print("For {} damage.".format(ArmadaDice.pool_damage(a_roll)))
-                    ship_b.damage("front", ArmadaDice.pool_damage(a_roll))
-                print("Ship {} destroys {} in {} rolls and distance {}.".format(ship_name_a, ship_name_b, num_rolls, distance))
-
-        #print("Ship b rolls:")
-        #for i in range(0, len(b_colors)):
-        #    print("{}: {} {}".format(i, b_colors[i], b_roll[i]))
-        #print("For {} damage.".format(ArmadaDice.pool_damage(b_roll)))
-        # TODO(calculate number of rolls to deplete the other ship's hull)
-        # Probably only necessary to go from a to b
-        # TODO(run multiple simulations)
+                roll_counts = []
+                print("{} vs {} at distance {}".format(ship_name_a, ship_name_b, distance))
+                for trial in range(250):
+                    # Reset ship b for each trial
+                    ship_b = ship.Ship(name=ship_name_b, template=ship_templates[ship_name_b], upgrades=[])
+                    num_rolls = 0
+                    while 0 < ship_b.hull():
+                        num_rolls += 1
+                        a_colors, a_roll = ship_a.roll("front", distance)
+                        ship_b.damage("front", ArmadaDice.pool_damage(a_roll))
+                    roll_counts.append(num_rolls)
+                np_counts = numpy.array(roll_counts)
+                print("Ship {} destroys {} in {} average rolls, stddev = {}, at distance {}.".format(ship_name_a, ship_name_b, np_counts.mean(), np_counts.var()**0.5, distance))
         # TODO(take defense tokens into account)
+        #  Make a base player class that allows you to bind a function for this stuff
+        # TODO(take accuracy into account)
+        #  Again, need to create an interface to plug in an agent
         # TODO(take upgrades and admirals into account)
+        #  Much more complicated
+        # TODO(Add in positions and movement)
         # TODO(repeat for double arcs, just side arcs)
 
