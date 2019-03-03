@@ -3,11 +3,13 @@
 # Just a simple script that compares outcomes when ships of different types joust.
 # No maneuvering is taken into account.
 
-import csv
 import numpy
 import random
 
+import argparse
 import ship
+import sys
+import utility
 from dice import ArmadaDice
 from base_agent import spendDefenseTokens
 
@@ -15,46 +17,38 @@ from base_agent import spendDefenseTokens
 # Seed with time or a local source of randomness
 random.seed()
 
-def parseShips(filename):
-    keys = {}
-    ship_templates = {}
-    with open(filename, newline='') as ships:
-        shipreader = csv.reader(ships, delimiter=',', quotechar='|')
-        rowcount = 0
-        for row in shipreader:
-            # parse the header first to find the column keys
-            if ( 0 == rowcount ):
-                count = 0
-                for key in row:
-                    count = count + 1
-                    keys[count] = key
-            else:
-                newship = {}
-                count = 0
-                # Fill in all of the information on this vessel
-                for key in row:
-                    count = count + 1
-                    newship[keys[count]] = key
-                # Create a new ship template
-                ship_templates[newship['Ship Name']] = newship
-            rowcount = rowcount + 1
-    return keys, ship_templates
+parser = argparse.ArgumentParser(description='Process dice counts.')
+parser.add_argument('--ship1', type=str, required=True, help='Name of a ship or "all"')
+parser.add_argument('--ship2', type=str, required=True, help='Name of a ship or "all"')
+parser.add_argument('--ranges', type=str, nargs='+', required=True, help='Ranges (short, medium, long)')
+# TODO Allow specification of hull zones
 
+args = parser.parse_args()
 
-keys, ship_templates = parseShips('../../armada-ship-stats.csv')
+keys, ship_templates = utility.parseShips('../../armada-ship-stats.csv')
 #print("keys are", keys)
 #print("ships are ", ship_templates)
 
-def print_roll(colors, roll):
-    for i in range(0, len(colors)):
-        print("{}: {} {}".format(i, colors[i], roll[i]))
+first_ship_names = []
+if 'all' == args.ship1:
+    first_ship_names = [name for name in ship_templates.keys()]
+else:
+    first_ship_names = [args.ship1]
 
-# TODO make this a command line argument
+if 'all' == args.ship2:
+    second_ship_names = [name for name in ship_templates.keys()]
+else:
+    second_ship_names = [args.ship2]
+
+for distance in args.ranges:
+    if distance not in ["long", "medium", "short"]:
+        print("Unknown range for ship combat: {}".format(distance))
+        sys.exit(1)
 
 # Loop through all pairs and have them joust
-for ship_name_1 in ship_templates:
+for ship_name_1 in first_ship_names:
     ship_1 = ship.Ship(name=ship_name_1, template=ship_templates[ship_name_1], upgrades=[], player_number=1)
-    for ship_name_2 in ship_templates:
+    for ship_name_2 in second_ship_names:
         for distance in ["long", "medium", "short"]:
             # Make sure we are actually rolling dice
             a_colors, a_roll = ship_1.roll("front", distance)
