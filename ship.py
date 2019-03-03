@@ -31,21 +31,23 @@ class ShipType:
         self.attributes = attributes
 
 class Ship:
-    def __init__(self, name, template, upgrades):
+    def __init__(self, name, template, upgrades, player_number):
         """Contsruct a specific instance of a ship.
         
         Args:
-            name (str)                   : Name for this vessel
-            template (ShipType)          : Ship template to copy
-            upgrades (table str->str)    : Upgrades to equip
+            name (str)                   : Name for this vessel.
+            template (ShipType)          : Ship template to copy.
+            upgrades (table str->str)    : Upgrades to equip.
+            player_number (int)          : The player who controls this ship.
         """
         self.name = name
+        self.player_number = player_number
         # Deep copy the attributes from the template
         self.attributes = {}
         for attr in template:
             key = attr.lower()
             self.attributes[key] = template[attr]
-            if 'armament' in key:
+            if 'armament' in key or 'defense token' in key:
                 if 0 == len(self.attributes[key]):
                     self.attributes[key] = 0
                 else:
@@ -54,12 +56,19 @@ class Ship:
         self.upgrades = upgrades
         # Initialize attributes of this specific ship instance
         self._hull = int(self.attributes["hull"])
-        #TODO Shields and defence tokens
+        # Iniitialize shields and defence tokens
         self.shields = {}
         self.shields["left"] = int(self.attributes["shields left"])
         self.shields["right"] = int(self.attributes["shields right"])
         self.shields["front"] = int(self.attributes["shields front"])
         self.shields["rear"] = int(self.attributes["shields rear"])
+        self.defense_tokens = []
+        offset = len("defence token ")
+        for token in ["defense token redirect", "defense token brace", "defense token evade",
+                      "defense token contain", "defense token scatter"]:
+            # Insert a green token for each available token
+            for _ in range(self.attributes[token]):
+                self.defense_tokens.append("green " + token[offset:].lower())
 
     def roll(self, zone, distance):
         """

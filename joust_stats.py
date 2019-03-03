@@ -9,6 +9,7 @@ import random
 
 import ship
 from dice import ArmadaDice
+from base_agent import spendDefenseTokens
 
 
 # Seed with time or a local source of randomness
@@ -51,26 +52,36 @@ def print_roll(colors, roll):
 # TODO make this a command line argument
 
 # Loop through all pairs and have them joust
-for ship_name_a in ship_templates:
-    ship_a = ship.Ship(name=ship_name_a, template=ship_templates[ship_name_a], upgrades=[])
-    for ship_name_b in ship_templates:
+for ship_name_1 in ship_templates:
+    ship_1 = ship.Ship(name=ship_name_1, template=ship_templates[ship_name_1], upgrades=[], player_number=1)
+    for ship_name_2 in ship_templates:
         for distance in ["long", "medium", "short"]:
             # Make sure we are actually rolling dice
-            a_colors, a_roll = ship_a.roll("front", distance)
+            a_colors, a_roll = ship_1.roll("front", distance)
             if 0 < len(a_colors):
                 roll_counts = []
-                print("{} vs {} at distance {}".format(ship_name_a, ship_name_b, distance))
+                print("{} vs {} at distance {}".format(ship_name_1, ship_name_2, distance))
                 for trial in range(250):
                     # Reset ship b for each trial
-                    ship_b = ship.Ship(name=ship_name_b, template=ship_templates[ship_name_b], upgrades=[])
+                    ship_2 = ship.Ship(name=ship_name_2, template=ship_templates[ship_name_2], upgrades=[], player_number=2)
                     num_rolls = 0
-                    while 0 < ship_b.hull():
+                    while 0 < ship_2.hull():
                         num_rolls += 1
-                        a_colors, a_roll = ship_a.roll("front", distance)
-                        ship_b.damage("front", ArmadaDice.pool_damage(a_roll))
+                        a_colors, a_roll = ship_1.roll("front", distance)
+
+                        world_state = {
+                            'attack': {
+                                'range': distance,
+                                'defender': ship_2,
+                                'pool_colors': a_colors,
+                                'pool_faces': a_roll,
+                            }
+                        }
+                        world_state = spendDefenseTokens(world_state, "spend defense tokens", 1)
+                        ship_2.damage("front", ArmadaDice.pool_damage(world_state['attack']['pool_faces']))
                     roll_counts.append(num_rolls)
                 np_counts = numpy.array(roll_counts)
-                print("Ship {} destroys {} in {} average rolls, stddev = {}, at distance {}.".format(ship_name_a, ship_name_b, np_counts.mean(), np_counts.var()**0.5, distance))
+                print("Ship {} destroys {} in {} average rolls, stddev = {}, at distance {}.".format(ship_name_1, ship_name_2, np_counts.mean(), np_counts.var()**0.5, distance))
         # TODO(take defense tokens into account)
         #  Make a base player class that allows you to bind a function for this stuff
         # TODO(take accuracy into account)
