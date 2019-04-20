@@ -63,7 +63,7 @@ class Ship:
         self.shields["front"] = int(self.attributes["shields front"])
         self.shields["rear"] = int(self.attributes["shields rear"])
         self.defense_tokens = []
-        offset = len("defence token ")
+        offset = len("defense token ")
         for token in ["defense token redirect", "defense token brace", "defense token evade",
                       "defense token contain", "defense token scatter"]:
             # Insert a green token for each available token
