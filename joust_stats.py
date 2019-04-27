@@ -11,7 +11,7 @@ import ship
 import sys
 import utility
 from dice import ArmadaDice
-from base_agent import spendDefenseTokens
+from base_agent import (resolveAttackEffects, spendDefenseTokens)
 
 
 # Seed with time or a local source of randomness
@@ -91,30 +91,59 @@ def handleAttack(world_state, attacker, defender, attack_range):
 
     def spend(idx, defender):
         tokens = defender.defense_tokens
+        name = tokens[idx]
         if 'green' in tokens[idx]:
             defender.defense_tokens[idx] = tokens[idx].replace('green', 'red')
         else:
-            # Token is red if it is not red, discard it
+            # Token is red if it is not green, discard it
             defender.defense_tokens = tokens[0:idx] + tokens[idx+1:]
+        return name
+
+    def get_token_type(index, defender):
+        if "red" in defender.defense_tokens[index]:
+            return defender.defense_tokens[index][len("red "):]
+        else:
+            return defender.defense_tokens[index][len("green "):]
+
+
+    # TODO Roll the phase into the world state
+    attack_effect_targets = resolveAttackEffects(world_state, ("ship phase", "attack - resolve attack effects"))
+
+    spent_dice = []
+    for effect_tuple in attack_effect_targets:
+        action = effect_tuple[0]
+        if "accuracy" == action:
+            source, target = effect_tuple[1], effect_tuple[2]
+            # Mark this die as spent, they will be removed from the pool after we handle operations
+            # that require the indexes to stay the same
+            spent_dice.append(source)
+            token_type = get_token_type(target, defender[0])
+            # The token isn't really being spent, it just cannot be used normally
+            # TODO should just mark tokens as available (or not) to spend
+            spent_tokens[token_type] = True
+    # Remove the spent dice
+    for index in sorted(spent_dice, reverse=True):
+        del pool_faces[index]
+        del pool_colors[index]
+
 
     token, token_targets = spendDefenseTokens(world_state, ("ship phase", "attack - spend defense tokens"))
-    while None != token and token in defender[0].defense_tokens:
+    while None != token and token < len(defender[0].defense_tokens):
         # Spend the token and resolve the effect
-        spend(token_index(token, defender))
+        token_type = spend(token, defender[0])
         # TODO If a token has already been spent it cannot be spent again, we should enforce that here.
-        if "brace" in token:
+        if "brace" in token_type:
             spent_tokens['brace'] = True
-        elif "scatter" in token:
+        elif "scatter" in token_type:
             spent_tokens['scatter'] = True
-        elif "contain" in token:
+        elif "contain" in token_type:
             spent_tokens['contain'] = True
-        elif "redirect" in token:
+        elif "redirect" in token_type:
             spent_tokens['redirect'] = True
             redirect_hull, redirect_amount = token_targets
-        elif "evade" in token:
+        elif "evade" in token_type:
             # Need to evade a specific die
             die_index = token_targets
-            matches = [idx for idx in range(len(pool_colors)) if color == pool_colors[idx] and face == pool_faces[idx]]
             if die_index >= len(pool_colors):
                 print("Warning: could not find specified evade token target.")
             else:
@@ -125,9 +154,11 @@ def handleAttack(world_state, attacker, defender, attack_range):
                     pool_faces = pool_faces[:die_index] + pool_faces[die_index+1:]
                 elif 'medium' == attack_range:
                     # Reroll the die
-                    pool_faces[die_index] = ArmadaDice.random_roll(pool_faces[die_index])
+                    pool_faces[die_index] = ArmadaDice.random_roll(pool_colors[die_index])
+                world_state['attack']['pool_colors'] = pool_colors
+                world_state['attack']['pool_faces'] = pool_faces
         # See if the agent will spend another defense token
-        token, token_target = spendDefenseTokens(world_state, ("ship phase", "attack - spend defense tokens"))
+        token, token_targets = spendDefenseTokens(world_state, ("ship phase", "attack - spend defense tokens"))
 
     # TODO The defender may have ways of modifying the attack pool at this point
 
