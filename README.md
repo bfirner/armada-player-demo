@@ -23,6 +23,7 @@ __Current State__
 __TODOs__
 * We need tests because bugs are easy to write and there is enough code here that we can worry about
   regressions
+* * After implementing the first test (for braces) we already have a test failure.
 * * Basically we should do some clean up to remove some TODOs but there is always a chance to break
     something when you work on it
 * * The best way to prevent this is to have a few tests

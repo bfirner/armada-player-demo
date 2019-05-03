@@ -54,9 +54,13 @@ class Ship:
                     self.attributes[key] = int(self.attributes[key])
         # TODO Check for legality
         self.upgrades = upgrades
+        self.reset()
+
+    def reset(self):
+        """Resets shields, hull, and defense tokens."""
         # Initialize attributes of this specific ship instance
         self._hull = int(self.attributes["hull"])
-        # Iniitialize shields and defence tokens
+        # Initialize shields and defence tokens
         self.shields = {}
         self.shields["left"] = int(self.attributes["shields left"])
         self.shields["right"] = int(self.attributes["shields right"])
