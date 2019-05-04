@@ -1,5 +1,7 @@
 # Game engine for Armada. Currently only partially supports the attack step.
 
+import logging
+
 from dice import ArmadaDice
 from base_agent import (resolveAttackEffects, spendDefenseTokens)
 
@@ -26,9 +28,12 @@ def handleAttack(world_state, attacker, defender, attack_range):
         'pool_faces': pool_faces,
         # Keep track of which tokens are spent.
         # Tokens cannot be spent multiple times in a single attack.
-        'spent_tokens': {}
+        'spent_tokens': {},
+        # A token targeted with an accuracy cannot be spent.
+        'accuracy_tokens': []
     }
     spent_tokens = world_state['attack']['spent_tokens']
+    acc_tokens = world_state['attack']['accuracy_tokens']
     redirect_hull = None
     redirect_amount = None
 
@@ -60,14 +65,13 @@ def handleAttack(world_state, attacker, defender, attack_range):
     for effect_tuple in attack_effect_targets:
         action = effect_tuple[0]
         if "accuracy" == action:
-            source, target = effect_tuple[1], effect_tuple[2]
+            die_index, token_index = effect_tuple[1], effect_tuple[2]
             # Mark this die as spent, they will be removed from the pool after we handle operations
             # that require the indexes to stay the same
-            spent_dice.append(source)
-            token_type = get_token_type(target, defender[0])
-            # The token isn't really being spent, it just cannot be used normally
-            # TODO should just mark tokens as available (or not) to spend
-            spent_tokens[token_type] = True
+            spent_dice.append(die_index)
+            # An token targeted with an accuracy cannot be spent normally
+            acc_tokens.append(token_index)
+            token_type = get_token_type(token_index, defender[0])
     # Remove the spent dice
     for index in sorted(spent_dice, reverse=True):
         del pool_faces[index]
@@ -130,6 +134,7 @@ def handleAttack(world_state, attacker, defender, attack_range):
     defender[0].damage(defender[1], damage)
 
     # TODO Log the world state into a game log
+    logging.info(world_state)
 
     # Clear the attack-only states and return the world state with modified ship status
     world_state['attack'] = {}

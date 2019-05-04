@@ -122,6 +122,13 @@ class Ship:
     def hull(self):
         return self._hull
 
+    def __str__(self):
+        return str("{}: hull ({}), shields {}, defense tokens ({})".format(self.name, self.hull(), self.shields, self.defense_tokens))
+
+    def __repr__(self):
+        return str("{}: hull ({}), shields {}, defense tokens ({})".format(self.name, self.hull(), self.shields, self.defense_tokens))
+               
+
 def parseShips(filename):
     """ Returns a list of ships."""
     keys = {}

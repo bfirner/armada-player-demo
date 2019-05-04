@@ -3,6 +3,7 @@
 # Just a simple script that compares outcomes when ships of different types joust.
 # No maneuvering is taken into account.
 
+import logging
 import numpy
 import random
 
@@ -58,6 +59,8 @@ for distance in args.ranges:
         sys.exit(1)
 
     
+# Set up logging to track what happens during the die rolling.
+logging.basicConfig(filename='joust.log',level=logging.DEBUG)
 
 # Loop through all pairs and have them joust
 for ship_name_1 in first_ship_names:
@@ -69,7 +72,9 @@ for ship_name_1 in first_ship_names:
             if 0 < len(a_colors):
                 roll_counts = []
                 print("{} vs {} at range {}".format(ship_name_1, ship_name_2, attack_range))
+                logging.info("{} vs {} at range {}".format(ship_name_1, ship_name_2, attack_range))
                 for trial in range(250):
+                    logging.info("Trial number {}".format(trial))
                     # Reset ship b for each trial
                     ship_2 = ship.Ship(name=ship_name_2, template=ship_templates[ship_name_2], upgrades=[], player_number=2)
                     world_state = {
@@ -93,6 +98,7 @@ for ship_name_1 in first_ship_names:
                     roll_counts.append(num_rolls)
                 np_counts = numpy.array(roll_counts)
                 print("Ship {} destroys {} in {} average rolls, stddev = {}, at range {}.".format(ship_name_1, ship_name_2, np_counts.mean(), np_counts.var()**0.5, attack_range))
+                logging.info("Ship {} destroys {} in {} average rolls, stddev = {}, at range {}.\n".format(ship_name_1, ship_name_2, np_counts.mean(), np_counts.var()**0.5, attack_range))
         # TODO(take defense tokens into account)
         #  Make a base player class that allows you to bind a function for this stuff
         # TODO(take accuracy into account)

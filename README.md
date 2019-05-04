@@ -1,10 +1,8 @@
 __Changes__
-* Fixed a lot of bugs in the previous commit
-* Added an agent that can select accuraces to lock down defense tokens
-* The agent's role has been updated to match what it must be to plug in different AI modules.
-* * The agent no longer modifies the world state
-* * The agent is called multiple times as long as it has choices to make and returns an empty result to indicate no more optional actions will be taken.
-* The game state has a few more pieces of information in it, but there isn't any state logging yet.
+* Fixed a bug where if a defense token was the first token it would not be spent.
+* * Also added logging to help examine these states, this makes the joust program create big logs.
+* * * There should probably be a log level option.
+* The test for brace works now.
 
 __Current State__
 * Can parse and load ship information, although currently only the dice, shields, and hull zone information is used.

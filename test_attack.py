@@ -51,12 +51,14 @@ def a_vs_b(ship_a, ship_b, trials, attack_range):
 
 def test_brace():
     """Test that brace increases the number of attacks required to destroy a ship."""
+
     attacker = ship.Ship(name="Attacker", template=ship_templates["Attacker"], upgrades=[], player_number=1)
 
     no_brace = ship.Ship(name="No Defense Tokens", template=ship_templates["No Defense Tokens"], upgrades=[], player_number=2)
     one_brace = ship.Ship(name="Single Brace", template=ship_templates["Single Brace"], upgrades=[], player_number=2)
     two_brace = ship.Ship(name="Double Brace", template=ship_templates["Double Brace"], upgrades=[], player_number=2)
 
+    # Test with 1000 trials to compensate for the natural variability in rolls
     for attack_range in ['long', 'medium', 'short']:
         no_brace_attacks = a_vs_b(attacker, no_brace, 1000, attack_range)
         one_brace_attacks = a_vs_b(attacker, one_brace, 1000, attack_range)

@@ -29,10 +29,12 @@ def greenest_token_index(token, defender):
             reds.append(idx)
     return greens + reds
 
-# The first, greenest token of the given type.
-def greenest_token(name, defender):
-    green_tokens = token_index('green {}'.format(name), defender)
-    red_tokens = token_index('red {}'.format(name), defender)
+# Return the index of the first, greenest token of the given type that can be spent.
+def greenest_token(name, defender, accuracy_tokens):
+    green_tokens = [idx for idx in token_index('green {}'.format(name), defender) if not idx in
+            accuracy_tokens]
+    red_tokens = [idx for idx in token_index('red {}'.format(name), defender) if not idx in
+            accuracy_tokens]
     if green_tokens or red_tokens:
         return green_tokens[0] if green_tokens else red_tokens[0]
     else:
@@ -80,7 +82,7 @@ def resolveAttackEffects(world_state, current_step):
 
     # Since we are only dealing with spending accuracies at this time return here if there are none.
     accuracies = face_index("accuracy", pool_faces)
-    if not accuracies:
+    if 0 == len(accuracies):
         return []
     # Keep track of which accuracy we will spend next
     acc_index = 0
@@ -173,6 +175,7 @@ def spendDefenseTokens(world_state, current_step):
     pool_colors = attack['pool_colors']
     pool_faces = attack['pool_faces']
     spent_tokens = attack['spent_tokens']
+    accuracy_tokens = attack['accuracy_tokens']
 
     # Very simple agent. We will just go through a few simple rules.
 
@@ -187,12 +190,12 @@ def spendDefenseTokens(world_state, current_step):
     # Scatter has highest priority. Note that it may be smarter to evade an
     # attack with only one damage die so this isn't the smartest agent, but
     # this is just a basic agent so this is okay.
-    scatter = greenest_token("scatter", defender)
-    if scatter:
+    scatter = greenest_token("scatter", defender, accuracy_tokens)
+    if None != scatter:
         return (scatter, None)
 
-    evade = greenest_token("evade", defender)
-    if not 'evade' in spent_tokens and evade:
+    evade = greenest_token("evade", defender, accuracy_tokens)
+    if not 'evade' in spent_tokens and None != evade:
         # If the range is long we can evade the die with the largest damage.
         # The best action is actually more complicated because removing a die may
         # not be necessary if we will brace and the current damage is an even
@@ -203,15 +206,15 @@ def spendDefenseTokens(world_state, current_step):
             # If we made it here then there were no dice worth cancelling or rerolling.
 
     # Brace if damage > 1
-    brace = greenest_token("brace", defender)
-    if not 'brace' in spent_tokens and brace and 1 < ArmadaDice.pool_damage(pool_faces):
+    brace = greenest_token("brace", defender, accuracy_tokens)
+    if not 'brace' in spent_tokens and None != brace and 1 < ArmadaDice.pool_damage(pool_faces):
         return (brace, None)
 
     # Redirect to preserve shields
     # Should really check adjacent shields and figure out what to redirect, but we will leave that
     # to a smarter agent.
-    redirect = greenest_token("redirect", defender)
-    if not 'redirect' in spent_tokens and redirect and 0 < ArmadaDice.pool_damage(pool_faces):
+    redirect = greenest_token("redirect", defender, accuracy_tokens)
+    if not 'redirect' in spent_tokens and None != redirect and 0 < ArmadaDice.pool_damage(pool_faces):
         # TODO Now handle redirect
         pass
 
