@@ -7,6 +7,8 @@ import pytest
 import ship
 import utility
 from game_engine import handleAttack
+from simple_agent import (SimpleAgent)
+from world_state import (WorldState)
 
 # Initialize ships from the test ship list
 keys, ship_templates = utility.parseShips('data/test_ships.csv')
@@ -24,27 +26,20 @@ def a_vs_b(ship_a, ship_b, trials, attack_range):
     
     """
     roll_counts = []
+    agent = SimpleAgent()
     for trial in range(trials):
         # Reset ship b for each trial
         ship_b.reset()
-        world_state = {
-            'ships': [ ship_a, ship_b ]
-        }
+        world_state = WorldState()
+        world_state.addShip(ship_a, 0)
+        world_state.addShip(ship_b, 1)
         num_rolls = 0
         while 0 < ship_b.hull():
             num_rolls += 1
-            a_colors, a_roll = ship_a.roll("front", attack_range)
-
-            world_state = {
-                'attack': {
-                    'range': attack_range,
-                    'defender': ship_b,
-                    'pool_colors': a_colors,
-                    'pool_faces': a_roll,
-                }
-            }
             # Handle the attack and receive the updated world state
-            world_state = handleAttack(world_state, (ship_a, "front"), (ship_b, "front"), attack_range)
+            world_state = handleAttack(world_state=world_state, attacker=(ship_a, "front"),
+                                       defender=(ship_b, "front"), attack_range=attack_range,
+                                       offensive_agent=agent, defensive_agent=agent)
         roll_counts.append(num_rolls)
     np_counts = numpy.array(roll_counts)
     return np_counts.mean()

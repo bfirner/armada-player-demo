@@ -3,6 +3,9 @@
 from enum import Enum
 
 from dice import ArmadaDice
+from game_constants import (
+    ArmadaDimensions
+)
 
 class UpgradeType(Enum):
     commander             = 1
@@ -54,12 +57,25 @@ class Ship:
                     self.attributes[key] = int(self.attributes[key])
         # TODO Check for legality
         self.upgrades = upgrades
+        self.width, self.height = ArmadaDimensions.ship_bases[template['Size'].lower()]
         self.reset()
+
+    def ready_defense_tokens(self):
+        """Replace all red tokens with green versions."""
+        for token in self.defense_tokens:
+            if 'red' in token:
+                token = 'green' + token[3:]
+
+    def ready_upgrade_cards(self):
+        """Unexhaust upgrade cards."""
+        # Not implemented yet
+        pass
 
     def reset(self):
         """Resets shields, hull, and defense tokens."""
         # Initialize attributes of this specific ship instance
         self._hull = int(self.attributes["hull"])
+        self.command_dials = []
         # Initialize shields and defence tokens
         self.shields = {}
         self.shields["left"] = int(self.attributes["shields left"])

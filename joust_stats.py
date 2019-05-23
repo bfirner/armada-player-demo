@@ -13,6 +13,8 @@ import sys
 import utility
 
 from game_engine import handleAttack
+from simple_agent import (SimpleAgent)
+from world_state import (WorldState)
 
 
 # Seed with time or a local source of randomness
@@ -62,6 +64,9 @@ for distance in args.ranges:
 # Set up logging to track what happens during the die rolling.
 logging.basicConfig(filename='joust.log',level=logging.DEBUG)
 
+# Agent for the simulation
+agent = SimpleAgent()
+
 # Loop through all pairs and have them joust
 for ship_name_1 in first_ship_names:
     ship_1 = ship.Ship(name=ship_name_1, template=ship_templates[ship_name_1], upgrades=[], player_number=1)
@@ -77,24 +82,16 @@ for ship_name_1 in first_ship_names:
                     logging.info("Trial number {}".format(trial))
                     # Reset ship b for each trial
                     ship_2 = ship.Ship(name=ship_name_2, template=ship_templates[ship_name_2], upgrades=[], player_number=2)
-                    world_state = {
-                        'ships': [ ship_1, ship_2 ]
-                    }
+                    world_state = WorldState()
+                    world_state.addShip(ship_1, 0)
+                    world_state.addShip(ship_2, 1)
                     num_rolls = 0
                     while 0 < ship_2.hull():
                         num_rolls += 1
-                        a_colors, a_roll = ship_1.roll("front", attack_range)
-
-                        world_state = {
-                            'attack': {
-                                'range': attack_range,
-                                'defender': ship_2,
-                                'pool_colors': a_colors,
-                                'pool_faces': a_roll,
-                            }
-                        }
                         # Handle the attack and receive the updated world state
-                        world_state = handleAttack(world_state, (ship_1, "front"), (ship_2, "front"), attack_range)
+                        world_state = handleAttack(world_state=world_state, attacker=(ship_1, "front"),
+                                                   defender=(ship_2, "front"), attack_range=attack_range,
+                                                   offensive_agent=agent, defensive_agent=agent)
                     roll_counts.append(num_rolls)
                 np_counts = numpy.array(roll_counts)
                 print("Ship {} destroys {} in {} average rolls, stddev = {}, at range {}.".format(ship_name_1, ship_name_2, np_counts.mean(), np_counts.var()**0.5, attack_range))

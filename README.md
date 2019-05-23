@@ -1,8 +1,8 @@
 __Changes__
-* Fixed a bug where if a defense token was the first token it would not be spent.
-* * Also added logging to help examine these states, this makes the joust program create big logs.
-* * * There should probably be a log level option.
-* The test for brace works now.
+* Created a base agent class and extended with the sipmle agent.
+* Create a real world state.
+* Restricted a lot of functionality to a surrounding class (e.g. only the game agent is modifying
+  the world state). This gets itneractions closer to their intended final states.
 
 __Current State__
 * Can parse and load ship information, although currently only the dice, shields, and hull zone information is used.
@@ -19,12 +19,9 @@ __Current State__
 * * This will work nicely with a machine learning agent because it turns the problem into a classification output.
 
 __TODOs__
-* We need tests because bugs are easy to write and there is enough code here that we can worry about
-  regressions
-* * After implementing the first test (for braces) we already have a test failure.
-* * Basically we should do some clean up to remove some TODOs but there is always a chance to break
-    something when you work on it
-* * The best way to prevent this is to have a few tests
+* Have a test for attacking with defense tokens, should have more to cover new functionality.
+* Train a model to use the defense tokens
+* *  Probably using reinforcement learning since we do not know the optimal policy.
 * Upgrades
 * Location, movement, etc
 * Command dials

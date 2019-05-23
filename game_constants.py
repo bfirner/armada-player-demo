@@ -1,9 +1,23 @@
 #! /usr/bin/python3
 
+#
+# Copyright Bernhard Firner, 2019
+#
 # Game constants describe the game phases and other immutable parts of the gameplay.
 # It is important to notice that the order of many phases are modified by different
 # upgrades or effects so the ordering of events is not immutable.
 # 
+
+
+class ArmadaDimensions:
+    # Ship sizes in mm (from the Armada FAQ) in (width, height) tuples
+    # TODO Should differentiate between plastic and cardboard dimensions
+    ship_bases = {
+        "small": (42,71),
+        "medium": (63,102),
+        "large": (77.5,129)
+    }
+    # TODO Squad bases
 
 
 class ArmadaPhases:

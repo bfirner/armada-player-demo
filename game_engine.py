@@ -3,25 +3,33 @@
 import logging
 
 from dice import ArmadaDice
-from base_agent import (resolveAttackEffects, spendDefenseTokens)
+from world_state import (AttackState, WorldState)
 
 
 # TODO This function should eventually part of a larger system to handle game logic.
-def handleAttack(world_state, attacker, defender, attack_range):
+def handleAttack(world_state, attacker, defender, attack_range, offensive_agent, defensive_agent):
     """This function handles the attack sub-phase of the ship phase.
 
     Args:
-        world_state (table) : Contains the list of ships, objects, etc that comprise the current game.
+        world_state (WorldState) : Contains the list of ships, objects, etc that comprise the current game.
         attacker (Tuple(Ship, hull zone)) : A tuple of the attacking ship and the string that denotes a hull zone.
         defender (Tuple(Ship, hull zone)) : A tuple of the defending ship and the string that denotes a hull zone.
         attack_range (str) : "long", "medium", or "short". TODO Remove this once ships have locations.
+        offensive_agent (BaseAgent) : An agent to handle actions on the offensive side.
+        defensive_agent (BaseAgent) : An agent to handle actions on the defensive side.
     Returns:
         world_state (table) : The world state after the attack completes.
     """
+    world_state.setPhase("attack", "")
+
+    # TODO Effects that occur before the attack should happen here (obstruction, Sato, etc)
+
     attack_ship, attack_hull = attacker[0], attacker[1]
     pool_colors, pool_faces = attack_ship.roll(attack_hull, attack_range)
-    world_state['attack'] = {
+    attack_dict = {
         'range': attack_range,
+        'attacker': attacker[0],
+        'attacking zone': attacker[1],
         'defender': defender[0],
         'defending zone': defender[1],
         'pool_colors': pool_colors,
@@ -32,8 +40,11 @@ def handleAttack(world_state, attacker, defender, attack_range):
         # A token targeted with an accuracy cannot be spent.
         'accuracy_tokens': []
     }
-    spent_tokens = world_state['attack']['spent_tokens']
-    acc_tokens = world_state['attack']['accuracy_tokens']
+    world_state.updateAttack(attack_dict)
+
+
+    spent_tokens = world_state.attack['spent_tokens']
+    acc_tokens = world_state.attack['accuracy_tokens']
     redirect_hull = None
     redirect_amount = None
 
@@ -59,7 +70,8 @@ def handleAttack(world_state, attacker, defender, attack_range):
 
 
     # TODO Roll the phase into the world state
-    attack_effect_targets = resolveAttackEffects(world_state, ("ship phase", "attack - resolve attack effects"))
+    world_state.setSubPhase("resolve attack effects")
+    attack_effect_targets = offensive_agent.handle(world_state)
 
     spent_dice = []
     for effect_tuple in attack_effect_targets:
@@ -78,7 +90,8 @@ def handleAttack(world_state, attacker, defender, attack_range):
         del pool_colors[index]
 
 
-    token, token_targets = spendDefenseTokens(world_state, ("ship phase", "attack - spend defense tokens"))
+    world_state.setSubPhase("spend defense tokens")
+    token, token_targets = defensive_agent.handle(world_state)
     while None != token and token < len(defender[0].defense_tokens):
         # Spend the token and resolve the effect
         token_type = spend(token, defender[0])
@@ -106,10 +119,10 @@ def handleAttack(world_state, attacker, defender, attack_range):
                 elif 'medium' == attack_range:
                     # Reroll the die
                     pool_faces[die_index] = ArmadaDice.random_roll(pool_colors[die_index])
-                world_state['attack']['pool_colors'] = pool_colors
-                world_state['attack']['pool_faces'] = pool_faces
+                world_state.attack['pool_colors'] = pool_colors
+                world_state.attack['pool_faces'] = pool_faces
         # See if the agent will spend another defense token
-        token, token_targets = spendDefenseTokens(world_state, ("ship phase", "attack - spend defense tokens"))
+        token, token_targets = defensive_agent.handle(world_state)
 
     # TODO The defender may have ways of modifying the attack pool at this point
 
@@ -127,15 +140,15 @@ def handleAttack(world_state, attacker, defender, attack_range):
         redirect_amount = min(damage, redirect_amount)
         defender[0].damage(redirect_hull, redirect_amount)
         damage = damage - redirect_amount
-        world_state['attack']['{} damage'.format(redirect_hull)] = redirect_amount
+        world_state.attack['{} damage'.format(redirect_hull)] = redirect_amount
 
     # Deal remaining damage to the defender
-    world_state['attack']['{} damage'.format(defender[1])] = damage
+    world_state.attack['{} damage'.format(defender[1])] = damage
     defender[0].damage(defender[1], damage)
 
     # TODO Log the world state into a game log
     logging.info(world_state)
 
     # Clear the attack-only states and return the world state with modified ship status
-    world_state['attack'] = {}
+    world_state.attack = {}
     return world_state
