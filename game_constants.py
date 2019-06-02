@@ -17,8 +17,14 @@ class ArmadaDimensions:
         "medium": (63,102),
         "large": (77.5,129)
     }
+    # TODO Cardboard size (used to determine attack range)
     # TODO Squad bases
 
+class ArmadaTypes:
+    defense_tokens = ["evade", "brace", "scatter", "contain", "redirect"]
+    token_colors = ["green", "red"]
+    max_defense_tokens = 6
+    ranges = ["short", "medium", "long"]
 
 class ArmadaPhases:
     main_phases = [

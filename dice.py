@@ -8,6 +8,7 @@ class ArmadaDice:
     hit_crit={ "red": 0, "blue": 0, "black": 2 }
     blank={ "red": 2, "blue": 0, "black": 2 }
 
+    die_colors = ["red", "blue", "black"]
     die_faces = { "hit": hit,
                   "crit": crit,
                   "accuracy": accuracy,
