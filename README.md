@@ -1,7 +1,7 @@
 __Changes__
 * Added the beginnings of a learning agent
 * * The messiest bit, encoding an attack state, is done.
-* * Tests are partially written, committing now because this is getting to be a large commit.
+* * All tests except for the die encodings are complete.
 * * The tests have some magic numbers in common with the agent, these should be shared through the
     agent (for example the size of some of the one-hot encodings)
 * Started moving a lot of constants into the `game_constants` file
