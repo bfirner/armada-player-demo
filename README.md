@@ -1,9 +1,8 @@
 __Changes__
 * Added the beginnings of a learning agent
 * * The messiest bit, encoding an attack state, is done.
-* * All tests except for the die encodings are complete.
-* * The tests have some magic numbers in common with the agent, these should be shared through the
-    agent (for example the size of some of the one-hot encodings)
+* * All tests are complete.
+* * Exposed some encoding constants through the learning agent.
 * Started moving a lot of constants into the `game_constants` file
 * * Will take some discipline to get all constants moved over
 
@@ -23,7 +22,7 @@ __Current State__
 * * This will work nicely with a machine learning agent because it turns the problem into a classification output.
 
 __TODOs__
-* Need to finish writing tests for the encodings
+* Time to train a model!
 * Have a test for attacking with defense tokens, should have more to cover new functionality.
 * Train a model to use the defense tokens
 * *  Probably using reinforcement learning since we do not know the optimal policy.

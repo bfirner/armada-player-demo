@@ -22,6 +22,11 @@ class LearningAgent(BaseAgent):
         }
         super(LearningAgent, self).__init__(handler)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Make some constants here to avoid magic numbers in the rest of this code
+        self.max_defense_tokens = ArmadaTypes.max_defense_tokens
+        self.hot_token_size = len(ArmadaTypes.defense_tokens) + len(ArmadaTypes.token_colors) + 1
+        self.hot_die_size = 9
+        self.max_die_slots = 16
 
     def encodeAttackState(self, world_state):
         """
@@ -30,10 +35,12 @@ class LearningAgent(BaseAgent):
         Returns:
             (torch.Tensor)           : Encoding of the world state used as network input.
         """
+        enc_size = 0
         # Encode the dice pool and faces, defense tokens, shields, and hull.
         # The input is much simpler if it is of fixed size. The inputs are:
         # attacker hull and shields - 5
         # defender hull and shields - 5
+        enc_size += 2*5
         # 
         # Need to encode each tokens separately, with a one-hot vector for the token type, color,
         # and whether it was targetted with an accuracy. The maximum number of tokens is six, for
@@ -41,23 +48,24 @@ class LearningAgent(BaseAgent):
         # ensure that the model doesn't learn things positionally or ignore later entries that are
         # less common.
         # spent token types - 5
-        # 6 * [type - 5, color - 2, accuracy targeted - 1] = 48
+        enc_size += len(ArmadaTypes.defense_tokens)
+        # max_defense_tokens * [type - 5, color - 2, accuracy targeted - 1] = 48
+        enc_size += self.max_defense_tokens * self.hot_token_size
         #
         # attack range - 3 (1-hot encoding)
+        enc_size += len(ArmadaTypes.ranges)
         #
         # We have a couple of options for the dice pool.
         # The simplest approach is to over-provision a vector with say 16 dice. There would be 3
-        # color vectors and 6 face vectors for a total of 9*16=144 inputs. During training we want
-        # the model to react properly to a die in any location in the vector, so we randomize the
-        # dice locations so that the entire vector is used (otherwise the model would be poorly
-        # trained for rolls with a very large number of dice)
+        # color vectors and 6 face vectors for a total of 9*16=144 inputs.
+        # 16 * [ color - 3, face - 6]
+        enc_size += self.max_die_slots * self.hot_die_size
+        # During training we want the model to react properly to a die in any location in the
+        # vector, so we randomize the dice locations so that the entire vector is used (otherwise
+        # the model would be poorly trained for rolls with a very large number of dice)
         # Total encoding size: 5 + 5 + 5 + 48 + 3 + 144 = 210
-        # Make some constants here to avoid magic numbers in the rest of this code
-        max_defense_tokens = ArmadaTypes.max_defense_tokens
-        hot_token_size = len(ArmadaTypes.defense_tokens) + len(ArmadaTypes.token_colors) + 1
-        hot_die_size = 9
-        max_die_slots = 16
-        encoding = torch.zeros(1, 210).to(self.device)
+        assert(enc_size == 210)
+        encoding = torch.zeros(1, enc_size).to(self.device)
 
         # Now populate the tensor
         attack = world_state.attack
@@ -95,9 +103,9 @@ class LearningAgent(BaseAgent):
 
         # Hot encoding the defenders tokens
         # Each hot encoding is: [type - 5, color - 2, accuracy targeted - 1]
-        slots = random.sample(range(max_defense_tokens), len(defender.defense_tokens))
+        slots = random.sample(range(self.max_defense_tokens), len(defender.defense_tokens))
         for token_idx, slot in enumerate(slots):
-            slot_offset = cur_offset + slot * hot_token_size
+            slot_offset = cur_offset + slot * self.hot_token_size
             token = defender.defense_tokens[token_idx]
             # Encode the token type
             for offset, ttype in enumerate(ArmadaTypes.defense_tokens):
@@ -111,7 +119,7 @@ class LearningAgent(BaseAgent):
             encoding[0, slot_offset] = 1 if token_idx in accuracy_tokens else 0
 
         # Move the current encoding offset to the position after the token section
-        cur_offset += hot_token_size * max_defense_tokens
+        cur_offset += self.hot_token_size * self.max_defense_tokens
 
         # Attack range
         for offset, arange in enumerate(ArmadaTypes.ranges):
@@ -120,10 +128,9 @@ class LearningAgent(BaseAgent):
 
         # Each die will be represented with a hot_die_size vector
         # There are max_die_slots slots for these, and we will fill them in randomly
-        hot_die_size = 9
-        slots = random.sample(range(max_die_slots), len(pool_colors))
+        slots = random.sample(range(self.max_die_slots), len(pool_colors))
         for die_idx, slot in enumerate(slots):
-            slot_offset = cur_offset + slot * hot_die_size
+            slot_offset = cur_offset + slot * self.hot_die_size
             # Encode die colors
             for offset, color in enumerate(ArmadaDice.die_colors):
                 encoding[0, slot_offset + offset] = 1 if color == pool_colors[die_idx] else 0
@@ -133,7 +140,7 @@ class LearningAgent(BaseAgent):
                 encoding[0, slot_offset + offset] = 1 if face == pool_faces[die_idx] else 0
 
         # Sanity check on the encoding size and the data put into it
-        assert encoding.size(1) == cur_offset + hot_die_size * max_die_slots
+        assert encoding.size(1) == cur_offset + self.hot_die_size * self.max_die_slots
 
         return encoding
 
