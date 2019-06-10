@@ -1,10 +1,9 @@
 __Changes__
 * Added the beginnings of a learning agent
-* * The messiest bit, encoding an attack state, is done.
-* * All tests are complete.
-* * Exposed some encoding constants through the learning agent.
+* * Fixed a test
 * Started moving a lot of constants into the `game_constants` file
 * * Will take some discipline to get all constants moved over
+* * Moved constants and shared numbers for encodings into `armada_encodings.py`
 
 __Current State__
 * Can encode the attack state part of the world model for use with a neural network

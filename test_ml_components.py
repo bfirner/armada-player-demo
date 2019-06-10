@@ -7,6 +7,7 @@ import torch
 
 import ship
 import utility
+from armada_encodings import (Encodings)
 from dice import (ArmadaDice)
 from learning_agent import (LearningAgent)
 from world_state import (WorldState)
@@ -93,27 +94,27 @@ def test_token_encodings():
     # Check the green token section
     ttensor = torch.tensor([0.0, 0, 0, 0, 0])
     ttensor[ArmadaTypes.defense_tokens.index("brace")] = 1.0
-    assert torch.equal(get_tokens(enc_one_brace, "green", agent.hot_token_size), ttensor)
+    assert torch.equal(get_tokens(enc_one_brace, "green", Encodings.hot_token_size), ttensor)
 
     ttensor = torch.tensor([0.0, 0, 0, 0, 0])
     ttensor[ArmadaTypes.defense_tokens.index("brace")] = 2.0
-    assert torch.equal(get_tokens(enc_two_brace, "green", agent.hot_token_size), ttensor)
+    assert torch.equal(get_tokens(enc_two_brace, "green", Encodings.hot_token_size), ttensor)
 
     ttensor = torch.tensor([0.0, 0, 0, 0, 0])
     ttensor[ArmadaTypes.defense_tokens.index("redirect")] = 2.0
-    assert torch.equal(get_tokens(enc_two_redirect, "green", agent.hot_token_size), ttensor)
+    assert torch.equal(get_tokens(enc_two_redirect, "green", Encodings.hot_token_size), ttensor)
 
     ttensor = torch.tensor([0.0, 0, 0, 0, 0])
     ttensor[ArmadaTypes.defense_tokens.index("evade")] = 2.0
-    assert torch.equal(get_tokens(enc_two_evade, "green", agent.hot_token_size), ttensor)
+    assert torch.equal(get_tokens(enc_two_evade, "green", Encodings.hot_token_size), ttensor)
 
     ttensor = torch.tensor([0.0, 0, 0, 0, 0])
     ttensor[ArmadaTypes.defense_tokens.index("contain")] = 2.0
-    assert torch.equal(get_tokens(enc_two_contain, "green", agent.hot_token_size), ttensor)
+    assert torch.equal(get_tokens(enc_two_contain, "green", Encodings.hot_token_size), ttensor)
 
     ttensor = torch.tensor([0.0, 0, 0, 0, 0])
     ttensor[ArmadaTypes.defense_tokens.index("scatter")] = 2.0
-    assert torch.equal(get_tokens(enc_two_scatter, "green", agent.hot_token_size), ttensor)
+    assert torch.equal(get_tokens(enc_two_scatter, "green", Encodings.hot_token_size), ttensor)
 
 
 def test_red_token_encodings():
@@ -150,23 +151,23 @@ def test_red_token_encodings():
     # Check the red token section
     ttensor = torch.tensor([0.0, 0, 0, 0, 0])
     ttensor[ArmadaTypes.defense_tokens.index("brace")] = 2.0
-    assert torch.equal(get_tokens(enc_two_brace, "red", agent.hot_token_size), ttensor)
+    assert torch.equal(get_tokens(enc_two_brace, "red", Encodings.hot_token_size), ttensor)
 
     ttensor = torch.tensor([0.0, 0, 0, 0, 0])
     ttensor[ArmadaTypes.defense_tokens.index("redirect")] = 2.0
-    assert torch.equal(get_tokens(enc_two_redirect, "red", agent.hot_token_size), ttensor)
+    assert torch.equal(get_tokens(enc_two_redirect, "red", Encodings.hot_token_size), ttensor)
 
     ttensor = torch.tensor([0.0, 0, 0, 0, 0])
     ttensor[ArmadaTypes.defense_tokens.index("evade")] = 2.0
-    assert torch.equal(get_tokens(enc_two_evade, "red", agent.hot_token_size), ttensor)
+    assert torch.equal(get_tokens(enc_two_evade, "red", Encodings.hot_token_size), ttensor)
 
     ttensor = torch.tensor([0.0, 0, 0, 0, 0])
     ttensor[ArmadaTypes.defense_tokens.index("contain")] = 2.0
-    assert torch.equal(get_tokens(enc_two_contain, "red", agent.hot_token_size), ttensor)
+    assert torch.equal(get_tokens(enc_two_contain, "red", Encodings.hot_token_size), ttensor)
 
     ttensor = torch.tensor([0.0, 0, 0, 0, 0])
     ttensor[ArmadaTypes.defense_tokens.index("scatter")] = 2.0
-    assert torch.equal(get_tokens(enc_two_scatter, "red", agent.hot_token_size), ttensor)
+    assert torch.equal(get_tokens(enc_two_scatter, "red", Encodings.hot_token_size), ttensor)
 
 
 def test_spent_encodings():
@@ -187,7 +188,7 @@ def test_spent_encodings():
     # Check the token section
     ttensor = torch.tensor([0.0, 0, 0, 0, 0])
     ttensor[ArmadaTypes.defense_tokens.index("brace")] = 2.0
-    assert torch.equal(get_tokens(enc_two_brace, "green", agent.hot_token_size), ttensor)
+    assert torch.equal(get_tokens(enc_two_brace, "green", Encodings.hot_token_size), ttensor)
 
     # Verify that no tokens are marked spent by default
     spent_begin = 2 * 5
@@ -219,9 +220,9 @@ def test_accuracy_encodings():
     # Verify that no tokens are targeted at first 
     token_begin = 2 * 5 + token_types
 
-    for token_slot in range(agent.max_defense_tokens):
-        offset = token_begin + token_slot * agent.hot_token_size
-        hot_token = enc_three_brace[0, offset:offset + agent.hot_token_size]
+    for token_slot in range(ArmadaTypes.max_defense_tokens):
+        offset = token_begin + token_slot * Encodings.hot_token_size
+        hot_token = enc_three_brace[0, offset:offset + Encodings.hot_token_size]
         assert 0.0 == hot_token[-1]
 
     green_offset = len(ArmadaTypes.defense_tokens) + ArmadaTypes.token_colors.index("green")
@@ -229,42 +230,49 @@ def test_accuracy_encodings():
 
     # Now target the red token
     world_state.attack['accuracy_tokens'] = [2]
-    enc = agent.encodeAttackState(world_state)[0]
+    enc_three_brace = agent.encodeAttackState(world_state)
 
     # Verify that only the red token has the accuracy flag set
-    for token_slot in range(agent.max_defense_tokens):
-        offset = token_slot * agent.hot_token_size
-        hot_token = enc_three_brace[0, offset:offset + agent.hot_token_size]
+    for token_slot in range(ArmadaTypes.max_defense_tokens):
+        offset = token_begin + token_slot * Encodings.hot_token_size
+        hot_token = enc_three_brace[0, offset:offset + Encodings.hot_token_size]
+        print(hot_token)
         if 1.0 == hot_token[green_offset]:
             assert 0.0 == hot_token[-1] 
-        if 1.0 == hot_token[red_offset]:
+        elif 1.0 == hot_token[red_offset]:
             assert 1.0 == hot_token[-1] 
+        else:
+            assert 0.0 == hot_token[-1] 
 
     # Target both green tokens
     world_state.attack['accuracy_tokens'] = [0,1]
-    enc = agent.encodeAttackState(world_state)[0]
+    enc_three_brace = agent.encodeAttackState(world_state)
 
-    # Verify that only the red token has the accuracy flag set
-    for token_slot in range(agent.max_defense_tokens):
-        offset = token_slot * agent.hot_token_size
-        hot_token = enc_three_brace[0, offset:offset + agent.hot_token_size]
+    # Verify that only the green tokens have the accuracy flag set
+    for token_slot in range(ArmadaTypes.max_defense_tokens):
+        offset = token_begin + token_slot * Encodings.hot_token_size
+        hot_token = enc_three_brace[0, offset:offset + Encodings.hot_token_size]
         if 1.0 == hot_token[green_offset]:
             assert 1.0 == hot_token[-1] 
-        if 1.0 == hot_token[red_offset]:
+        elif 1.0 == hot_token[red_offset]:
+            assert 0.0 == hot_token[-1] 
+        else:
             assert 0.0 == hot_token[-1] 
 
     # Target all tokens
     world_state.attack['accuracy_tokens'] = [0,1,2]
-    enc = agent.encodeAttackState(world_state)[0]
+    enc_three_brace = agent.encodeAttackState(world_state)
 
-    # Verify that only the red token has the accuracy flag set
-    for token_slot in range(agent.max_defense_tokens):
-        offset = token_slot * agent.hot_token_size
-        hot_token = enc_three_brace[0, offset:offset + agent.hot_token_size]
+    # Verify that all tokens have the accuracy flag set
+    for token_slot in range(ArmadaTypes.max_defense_tokens):
+        offset = token_begin + token_slot * Encodings.hot_token_size
+        hot_token = enc_three_brace[0, offset:offset + Encodings.hot_token_size]
         if 1.0 == hot_token[green_offset]:
             assert 1.0 == hot_token[-1] 
-        if 1.0 == hot_token[red_offset]:
+        elif 1.0 == hot_token[red_offset]:
             assert 1.0 == hot_token[-1] 
+        else:
+            assert 0.0 == hot_token[-1] 
 
 
 def test_range_encodings():
@@ -276,7 +284,7 @@ def test_range_encodings():
     no_token = ship.Ship(name="No Defense Tokens", template=ship_templates["No Defense Tokens"],
                          upgrades=[], player_number=2)
 
-    range_begin = 2 * 5 + agent.hot_token_size * ArmadaTypes.max_defense_tokens + token_types
+    range_begin = 2 * 5 + Encodings.hot_token_size * ArmadaTypes.max_defense_tokens + token_types
     for offset, attack_range in enumerate(ArmadaTypes.ranges):
         enc_attack = make_encoding(attacker, no_token, attack_range, agent)[0][0]
         assert torch.sum(enc_attack[range_begin:range_begin + len(ArmadaTypes.ranges)]) == 1
@@ -290,7 +298,7 @@ def test_roll_encodings():
     attacker = ship.Ship(name="Attacker", template=ship_templates["Attacker"], upgrades=[], player_number=1)
     no_token = ship.Ship(name="No Defense Tokens", template=ship_templates["No Defense Tokens"], upgrades=[], player_number=2)
 
-    dice_begin = 2 * 5 + agent.hot_token_size * ArmadaTypes.max_defense_tokens + token_types + len(ArmadaTypes.ranges)
+    dice_begin = 2 * 5 + Encodings.hot_token_size * ArmadaTypes.max_defense_tokens + token_types + len(ArmadaTypes.ranges)
 
     # Do 100 trials to ensure everything is working as expected
     _, world_state = make_encoding(attacker, no_token, "short", agent)
@@ -306,9 +314,9 @@ def test_roll_encodings():
         # [ color - 3, face - 6]
         enc_attack = agent.encodeAttackState(world_state)[0]
         # Try to find a match for each color,face pair
-        for slot in range(agent.max_die_slots):
-            begin = dice_begin + slot * agent.hot_die_size
-            end = begin + agent.hot_die_size
+        for slot in range(Encodings.max_die_slots):
+            begin = dice_begin + slot * Encodings.hot_die_size
+            end = begin + Encodings.hot_die_size
             dice_section = enc_attack[begin:end]
             # Should have a face and color or be empty
             assert (0 == dice_section.sum() or 2 == dice_section.sum())

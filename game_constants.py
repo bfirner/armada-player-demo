@@ -25,6 +25,8 @@ class ArmadaTypes:
     token_colors = ["green", "red"]
     max_defense_tokens = 6
     ranges = ["short", "medium", "long"]
+    # TODO Expand this for huge ships
+    hull_zones = ["left", "right", "front", "rear"]
 
 class ArmadaPhases:
     main_phases = [

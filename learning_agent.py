@@ -4,6 +4,7 @@
 import random
 
 import ship
+from armada_encodings import (Encodings)
 from dice import ArmadaDice
 from base_agent import BaseAgent 
 from game_constants import (ArmadaPhases, ArmadaTypes)
@@ -14,19 +15,23 @@ import torch
 
 class LearningAgent(BaseAgent):
 
-    def __init__(self):
-        """Initialize the simple agent with a cuople of simple state handlers."""
+    def __init__(self, model=None):
+        """Initialize the simple agent with a couple of simple state handlers.
+        
+        Args:
+            model (torch.nn.Module or None): If None this agent will pass for all supported states
+        """
         handler = {
                 "attack - resolve attack effects": self.resolveAttackEffects,
                 "attack - spend defense tokens": self.spendDefenseTokens
         }
         super(LearningAgent, self).__init__(handler)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # Make some constants here to avoid magic numbers in the rest of this code
-        self.max_defense_tokens = ArmadaTypes.max_defense_tokens
-        self.hot_token_size = len(ArmadaTypes.defense_tokens) + len(ArmadaTypes.token_colors) + 1
-        self.hot_die_size = 9
-        self.max_die_slots = 16
+        self.model = model
+        if None != self.model:
+            self.model = self.model.to(self.device)
+
+        self.attack_enc_size = Encodings.calculateAttackSize()
 
     def encodeAttackState(self, world_state):
         """
@@ -35,37 +40,7 @@ class LearningAgent(BaseAgent):
         Returns:
             (torch.Tensor)           : Encoding of the world state used as network input.
         """
-        enc_size = 0
-        # Encode the dice pool and faces, defense tokens, shields, and hull.
-        # The input is much simpler if it is of fixed size. The inputs are:
-        # attacker hull and shields - 5
-        # defender hull and shields - 5
-        enc_size += 2*5
-        # 
-        # Need to encode each tokens separately, with a one-hot vector for the token type, color,
-        # and whether it was targetted with an accuracy. The maximum number of tokens is six, for
-        # the SSD huge ship. The order of the tokens should be randomized with each encoding to
-        # ensure that the model doesn't learn things positionally or ignore later entries that are
-        # less common.
-        # spent token types - 5
-        enc_size += len(ArmadaTypes.defense_tokens)
-        # max_defense_tokens * [type - 5, color - 2, accuracy targeted - 1] = 48
-        enc_size += self.max_defense_tokens * self.hot_token_size
-        #
-        # attack range - 3 (1-hot encoding)
-        enc_size += len(ArmadaTypes.ranges)
-        #
-        # We have a couple of options for the dice pool.
-        # The simplest approach is to over-provision a vector with say 16 dice. There would be 3
-        # color vectors and 6 face vectors for a total of 9*16=144 inputs.
-        # 16 * [ color - 3, face - 6]
-        enc_size += self.max_die_slots * self.hot_die_size
-        # During training we want the model to react properly to a die in any location in the
-        # vector, so we randomize the dice locations so that the entire vector is used (otherwise
-        # the model would be poorly trained for rolls with a very large number of dice)
-        # Total encoding size: 5 + 5 + 5 + 48 + 3 + 144 = 210
-        assert(enc_size == 210)
-        encoding = torch.zeros(1, enc_size).to(self.device)
+        encoding = torch.zeros(1, self.attack_enc_size).to(self.device)
 
         # Now populate the tensor
         attack = world_state.attack
@@ -103,9 +78,9 @@ class LearningAgent(BaseAgent):
 
         # Hot encoding the defenders tokens
         # Each hot encoding is: [type - 5, color - 2, accuracy targeted - 1]
-        slots = random.sample(range(self.max_defense_tokens), len(defender.defense_tokens))
+        slots = random.sample(range(ArmadaTypes.max_defense_tokens), len(defender.defense_tokens))
         for token_idx, slot in enumerate(slots):
-            slot_offset = cur_offset + slot * self.hot_token_size
+            slot_offset = cur_offset + slot * Encodings.hot_token_size
             token = defender.defense_tokens[token_idx]
             # Encode the token type
             for offset, ttype in enumerate(ArmadaTypes.defense_tokens):
@@ -119,7 +94,7 @@ class LearningAgent(BaseAgent):
             encoding[0, slot_offset] = 1 if token_idx in accuracy_tokens else 0
 
         # Move the current encoding offset to the position after the token section
-        cur_offset += self.hot_token_size * self.max_defense_tokens
+        cur_offset += Encodings.hot_token_size * ArmadaTypes.max_defense_tokens
 
         # Attack range
         for offset, arange in enumerate(ArmadaTypes.ranges):
@@ -128,9 +103,12 @@ class LearningAgent(BaseAgent):
 
         # Each die will be represented with a hot_die_size vector
         # There are max_die_slots slots for these, and we will fill them in randomly
-        slots = random.sample(range(self.max_die_slots), len(pool_colors))
+        # During training we want the model to react properly to a die in any location in the
+        # vector, so we randomize the dice locations so that the entire vector is used (otherwise
+        # the model would be poorly trained for rolls with a very large number of dice)
+        slots = random.sample(range(Encodings.max_die_slots), len(pool_colors))
         for die_idx, slot in enumerate(slots):
-            slot_offset = cur_offset + slot * self.hot_die_size
+            slot_offset = cur_offset + slot * Encodings.hot_die_size
             # Encode die colors
             for offset, color in enumerate(ArmadaDice.die_colors):
                 encoding[0, slot_offset + offset] = 1 if color == pool_colors[die_idx] else 0
@@ -140,7 +118,7 @@ class LearningAgent(BaseAgent):
                 encoding[0, slot_offset + offset] = 1 if face == pool_faces[die_idx] else 0
 
         # Sanity check on the encoding size and the data put into it
-        assert encoding.size(1) == cur_offset + self.hot_die_size * self.max_die_slots
+        assert encoding.size(1) == cur_offset + Encodings.hot_die_size * Encodings.max_die_slots
 
         return encoding
 
@@ -162,6 +140,9 @@ class LearningAgent(BaseAgent):
         # We only handle one sub-phase in this function
         assert world_state.full_phase == "attack - resolve attack effects"
 
+        if None == self.model:
+            # Return no action
+            return []
         # Encode the state, forward through the network, decode the result, and return the result.
         pass
 
@@ -182,5 +163,35 @@ class LearningAgent(BaseAgent):
         # We only handle one sub-phase in this function
         assert world_state.full_phase == "attack - spend defense tokens"
 
+        if None == self.model:
+            # Return no action
+            return None, None
         # Encode the state, forward through the network, decode the result, and return the result.
-        pass
+        as_enc = self.encodeAttackState(world_state)
+        action = self.model.forwardDefenseTokens(as_enc)[0]
+        # The output of the model is a one-hot encoding of the token type and color, die index (used
+        # with evade), and hull zone index and amount of damage (for redirect)
+        ttype_begin = 0
+        tcolor_begin = ttype_begin + len(ArmadaTypes.defense_tokens)
+        die_begin = tcolor_begin + len(ArmadaTypes.token_colors)
+        hull_begin = die_begin + len(Encodings.max_die_slots)
+        redirect_ammount = hull_begin + len(ArmadaTypes.hull_zones)
+
+        # No token
+        if 0.0 == sum(action[ttype_begin:tcolor_begin]):
+            return None, None
+
+        token = ArmadaTypes.defense_tokens[action[ttype_begin:tcolor_begin].tolist().index(1.0)]
+        color = ArmadaTypes.token_colors[action[tcolor_begin:die_begin].tolist().index(1.0)]
+        if "evade" == token:
+            die_idx = action[die_begin:hull_begin].tolist().index(1.0)
+            return color + " " + token, die_idx
+
+        # TODO This only supports redirecting to a single hull zone currently
+        if "redirect" == token:
+            target_hull = ArmadaTypes.hull_zones[action[hull_begin:redirect_amount].tolist().index(1.0)]
+            amount = action[redirect_amount].item()
+            return color + " " + token, (target_hull, amount)
+
+        # Other defense tokens with no targets
+        return color + " " + token, None
