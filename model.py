@@ -19,8 +19,23 @@ class ArmadaModel(nn.Module):
         nn.Module.__init__(self)
         def_in = Encodings.calculateAttackSize()
         def_out = Encodings.calculateSpendDefenseTokensSize() + 2
-        self.def_tokens = self.init_fc_params(def_in, def_out)
+        self.models = nn.ModuleDict()
+        self.models["def_tokens"] = self.init_fc_params(def_in, def_out)
+        self.optimizers = {
+                "def_tokens": torch.optim.Adam(self.models["def_tokens"].parameters())
+                }
         self.sm = nn.Softmax()
+
+    def get_optimizer(self, model_name):
+        """
+        Gets an optimizer for one of the models.
+
+        Args:
+            model_name (str): The name of the model (.e.g. "def_tokens")
+        Returns:
+            torch.optim
+        """
+        return self.optimizers[model_name]
 
     def load(self, filename):
         """
@@ -32,7 +47,8 @@ class ArmadaModel(nn.Module):
             RuntimeError: If the file does not exist or has weight that that don't match this model.
         """
         params = torch.load(filename)
-        self.def_tokens.load_state_dict(params["def_tokens"])
+        self.models["def_tokens"].load_state_dict(params["def_tokens"])
+        self.optimizers["def_tokens"].load_state_dict(params["def_tokens_optimizer"])
 
     def save(self, filename):
         """
@@ -42,21 +58,23 @@ class ArmadaModel(nn.Module):
             filename (str): Path to the file.
         """
         torch.save({
-            "def_tokens": self.def_tokens.state_dict()
+            "def_tokens": self.models["def_tokens"].state_dict(),
+            "def_tokens_optimizer": self.optimizers["def_tokens"].state_dict()
             }, filename)
 
-    def forwardDefenseTokens(self, encoding):
+    def forward(self, model_name, encoding):
         """
         Forwards the encoding through the model.
 
         Args:
+            model_name (str): The name of the model (.e.g. "def_tokens")
             encoding (torch.tensor): An encoding of the attack state.
         Returns:
             Tuple(best action, survival mean, survival variance)
         """
         # Forward and return the results. The calling module will need to interpret them (e.g. by
         # rounding off or finding a most likely choice)
-        x = self.def_tokens.forward(encoding)
+        x = self.models[model_name].forward(encoding)
         return x
 
     def init_fc_params(self, input_size, output_size):

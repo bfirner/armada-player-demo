@@ -184,7 +184,7 @@ class LearningAgent(BaseAgent):
             return None, None
         # Encode the state, forward through the network, decode the result, and return the result.
         as_enc = self.encodeAttackState(world_state)
-        action = self.model.forwardDefenseTokens(as_enc)[0]
+        action = self.model.forward("def_tokens", as_enc)[0]
         # Remember this state action pair if in memory mode
         if self.remembering:
             self.memory.append((as_enc, action))

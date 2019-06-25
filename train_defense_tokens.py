@@ -84,17 +84,17 @@ prediction_agent = LearningAgent(ArmadaModel())
 if os.path.isfile("defense_token_model.checkpoint"):
     prediction_agent.model.load("defense_token_model.checkpoint")
 
-optimizer = torch.optim.Adam(prediction_agent.model.parameters())
+optimizer = prediction_agent.model.get_optimizer("def_tokens")
 examples = []
 batch_out = []
 batch_target = []
 loss_fn = torch.nn.MSELoss()
 
 # Set up logging to track what happens during training.
-logging.basicConfig(filename='training.log',level=logging.ERROR)
+logging.basicConfig(filename='training.log',level=logging.WARN)
 
 print("Collecting examples.")
-while len(examples) < 1000:
+while len(examples) < 3000:
     attack_range = random.choice(ArmadaTypes.ranges)
     attack_hull = random.choice(ArmadaTypes.hull_zones)
     defend_hull = random.choice(ArmadaTypes.hull_zones)
@@ -127,6 +127,7 @@ while len(examples) < 1000:
             # Get the (state, action) pairs back
             state_action_pairs = prediction_agent.returnStateActions()
             state_actions.append(state_action_pairs)
+            logging.info("\t roll {}, estimate {}".format(num_rolls, state_action_pairs[0][1][-2]))
         # Pair the lifetimes with the (state, action) pairs and push them into the examples list
         for roll_idx, state_action_pairs in enumerate(state_actions):
             # Have the prediction terminate at 0 so subtract an additional 1
