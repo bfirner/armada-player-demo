@@ -1,9 +1,8 @@
 __Changes__
 * Added the beginnings of a learning agent
-* * Fixed a test
-* Started moving a lot of constants into the `game_constants` file
-* * Will take some discipline to get all constants moved over
-* * Moved constants and shared numbers for encodings into `armada_encodings.py`
+* * A model is actually trained to predict the turns until a ship is destroyed
+* * Outputs are present for the actual defense token usage, but they currently do nothing
+* * Currently this is just supervised learning
 
 __Current State__
 * Can encode the attack state part of the world model for use with a neural network
@@ -21,10 +20,15 @@ __Current State__
 * * This will work nicely with a machine learning agent because it turns the problem into a classification output.
 
 __TODOs__
-* Time to train a model!
+* Switch from supervised learning to reinforcement learning
+* * The model should predict an action and that should guide how tokens are spent
+* * The model should simultaneously learn to predict the number of turns that the ship survives
+* * Currently the poisson distribution is a better fit than the normal (it converges to a lower
+    loss) but for other predictions this will not be the case.
+* * Some network tuning could be done now to make the prediction better, and we should make a subset
+    of the ships be for training and another set be for evaluation
 * Have a test for attacking with defense tokens, should have more to cover new functionality.
 * Train a model to use the defense tokens
-* *  Probably using reinforcement learning since we do not know the optimal policy.
 * Upgrades
 * Location, movement, etc
 * Command dials

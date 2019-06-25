@@ -43,3 +43,14 @@ class Encodings():
 
         return attack_enc_size
 
+    def calculateSpendDefenseTokensSize():
+        def_token_size = 0
+        # Index of the token to spend
+        def_token_size += ArmadaTypes.max_defense_tokens
+        # For evade target(s)
+        def_token_size += Encodings.max_die_slots
+        # For redirect target(s)
+        def_token_size += len(ArmadaTypes.hull_zones)
+
+        return def_token_size
+

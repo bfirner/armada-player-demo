@@ -30,8 +30,23 @@ class LearningAgent(BaseAgent):
         self.model = model
         if None != self.model:
             self.model = self.model.to(self.device)
+            self.model.eval()
 
         self.attack_enc_size = Encodings.calculateAttackSize()
+        self.memory = []
+        self.remembering = False
+
+    def rememberStateActions(self):
+        """Clear existing memory and begin logging pairs of input states and actions."""
+        self.remembering = True
+        self.memory = []
+
+    def returnStateActions(self):
+        """Return the remembered action states and clear them."""
+        results = self.memory
+        self.memory = []
+        self.remembering = False
+        return results
 
     def encodeAttackState(self, world_state):
         """
@@ -144,7 +159,8 @@ class LearningAgent(BaseAgent):
             # Return no action
             return []
         # Encode the state, forward through the network, decode the result, and return the result.
-        pass
+        # TODO
+        return []
 
     # This agent deals with the "spend defense tokens" step.
     def spendDefenseTokens(self, world_state):
@@ -169,16 +185,27 @@ class LearningAgent(BaseAgent):
         # Encode the state, forward through the network, decode the result, and return the result.
         as_enc = self.encodeAttackState(world_state)
         action = self.model.forwardDefenseTokens(as_enc)[0]
+        # Remember this state action pair if in memory mode
+        if self.remembering:
+            self.memory.append((as_enc, action))
+        # Clean off the lifetime prediction
+        with torch.no_grad():
+            action = torch.round(action[:Encodings.calculateSpendDefenseTokensSize()])
         # The output of the model is a one-hot encoding of the token type and color, die index (used
         # with evade), and hull zone index and amount of damage (for redirect)
         ttype_begin = 0
         tcolor_begin = ttype_begin + len(ArmadaTypes.defense_tokens)
         die_begin = tcolor_begin + len(ArmadaTypes.token_colors)
-        hull_begin = die_begin + len(Encodings.max_die_slots)
+        hull_begin = die_begin + Encodings.max_die_slots
         redirect_ammount = hull_begin + len(ArmadaTypes.hull_zones)
 
+        # TODO The selection slots are not guaranteed to make any sense, especially from an
+        # untrained neural network. There should be some sanity checks here.
+        return None, None
+
         # No token
-        if 0.0 == sum(action[ttype_begin:tcolor_begin]):
+        if (1.0 not in action[ttype_begin:tcolor_begin].tolist() or
+            1.0 not in action[tcolor_begin:die_begin].tolist()):
             return None, None
 
         token = ArmadaTypes.defense_tokens[action[ttype_begin:tcolor_begin].tolist().index(1.0)]
