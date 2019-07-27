@@ -10,7 +10,7 @@ import utility
 from armada_encodings import (Encodings)
 from dice import (ArmadaDice)
 from learning_agent import (LearningAgent)
-from world_state import (WorldState)
+from world_state import (AttackState, WorldState)
 from game_constants import (ArmadaTypes)
 
 # Initialize ships from the test ship list
@@ -50,23 +50,11 @@ def make_encoding(ship_a, ship_b, attack_range, agent):
     world_state.addShip(ship_b, 1)
 
     pool_colors, pool_faces = ship_a.roll("front", attack_range)
-    attack_dict = {
-        'range': attack_range,
-        'attacker': ship_a,
-        'attacking zone': "front",
-        'defender': ship_b,
-        'defending zone': "front",
-        'pool_colors': pool_colors,
-        'pool_faces': pool_faces,
-        # Keep track of which tokens are spent.
-        # Tokens cannot be spent multiple times in a single attack.
-        'spent_tokens': {},
-        # A token targeted with an accuracy cannot be spent.
-        'accuracy_tokens': []
-    }
-    world_state.updateAttack(attack_dict)
+    attack = AttackState(attack_range=attack_range, attacker=ship_a, attacking_hull="front",
+        defender=ship_b, defending_hull="front", pool_colors=pool_colors, pool_faces=pool_faces)
+    world_state.updateAttack(attack)
 
-    return agent.encodeAttackState(world_state), world_state
+    return agent.encodeAttackState(world_state)[0], world_state
 
 
 def test_token_encodings():
@@ -196,11 +184,11 @@ def test_spent_encodings():
 
     # Try spending some different token types
     for ttype in ArmadaTypes.defense_tokens:
-        spent_section = {}
-        spent_section[ttype] = True
-        world_state.attack['spent_tokens'] = spent_section
-        spent_enc = agent.encodeAttackState(world_state)[0]
-        ttensor = torch.tensor([0.0, 0, 0, 0, 0])
+        spent_section = [False] * len(ArmadaTypes.defense_tokens)
+        spent_section[ArmadaTypes.defense_tokens.index(ttype)] = True
+        world_state.attack.spent_types = spent_section
+        spent_enc = agent.encodeAttackState(world_state)[0][0]
+        ttensor = torch.tensor([0.0] * len(ArmadaTypes.defense_tokens))
         ttensor[ArmadaTypes.defense_tokens.index(ttype)] = 1.0
         assert torch.equal(spent_enc[spent_begin:spent_begin + token_types], ttensor)
 
@@ -220,59 +208,63 @@ def test_accuracy_encodings():
     # Verify that no tokens are targeted at first 
     token_begin = 2 * 5 + token_types
 
+    green_offset = len(ArmadaTypes.defense_tokens) + ArmadaTypes.token_colors.index("green")
+    red_offset = len(ArmadaTypes.defense_tokens) + ArmadaTypes.token_colors.index("red")
+    acc_offset = len(ArmadaTypes.defense_tokens) + len(ArmadaTypes.token_colors)
+
     for token_slot in range(ArmadaTypes.max_defense_tokens):
         offset = token_begin + token_slot * Encodings.hot_token_size
         hot_token = enc_three_brace[0, offset:offset + Encodings.hot_token_size]
-        assert 0.0 == hot_token[-1]
-
-    green_offset = len(ArmadaTypes.defense_tokens) + ArmadaTypes.token_colors.index("green")
-    red_offset = len(ArmadaTypes.defense_tokens) + ArmadaTypes.token_colors.index("red")
+        assert 0.0 == hot_token[acc_offset].item()
 
     # Now target the red token
-    world_state.attack['accuracy_tokens'] = [2]
-    enc_three_brace = agent.encodeAttackState(world_state)
+    world_state.attack.accuracy_tokens[2] = True
+    enc_three_brace = agent.encodeAttackState(world_state)[0][0]
 
     # Verify that only the red token has the accuracy flag set
     for token_slot in range(ArmadaTypes.max_defense_tokens):
         offset = token_begin + token_slot * Encodings.hot_token_size
-        hot_token = enc_three_brace[0, offset:offset + Encodings.hot_token_size]
-        print(hot_token)
+        hot_token = enc_three_brace[offset:offset + Encodings.hot_token_size]
         if 1.0 == hot_token[green_offset]:
-            assert 0.0 == hot_token[-1] 
+            assert 0.0 == hot_token[acc_offset].item() 
         elif 1.0 == hot_token[red_offset]:
-            assert 1.0 == hot_token[-1] 
+            assert 1.0 == hot_token[acc_offset].item() 
         else:
-            assert 0.0 == hot_token[-1] 
+            assert 0.0 == hot_token[acc_offset].item() 
 
     # Target both green tokens
-    world_state.attack['accuracy_tokens'] = [0,1]
-    enc_three_brace = agent.encodeAttackState(world_state)
+    world_state.attack.accuracy_tokens[0] = True
+    world_state.attack.accuracy_tokens[1] = True
+    world_state.attack.accuracy_tokens[2] = False
+    enc_three_brace = agent.encodeAttackState(world_state)[0][0]
 
     # Verify that only the green tokens have the accuracy flag set
     for token_slot in range(ArmadaTypes.max_defense_tokens):
         offset = token_begin + token_slot * Encodings.hot_token_size
-        hot_token = enc_three_brace[0, offset:offset + Encodings.hot_token_size]
+        hot_token = enc_three_brace[offset:offset + Encodings.hot_token_size]
         if 1.0 == hot_token[green_offset]:
-            assert 1.0 == hot_token[-1] 
+            assert 1.0 == hot_token[acc_offset].item() 
         elif 1.0 == hot_token[red_offset]:
-            assert 0.0 == hot_token[-1] 
+            assert 0.0 == hot_token[acc_offset].item() 
         else:
-            assert 0.0 == hot_token[-1] 
+            assert 0.0 == hot_token[acc_offset].item() 
 
     # Target all tokens
-    world_state.attack['accuracy_tokens'] = [0,1,2]
-    enc_three_brace = agent.encodeAttackState(world_state)
+    world_state.attack.accuracy_tokens[0] = True
+    world_state.attack.accuracy_tokens[1] = True
+    world_state.attack.accuracy_tokens[2] = True
+    enc_three_brace = agent.encodeAttackState(world_state)[0][0]
 
     # Verify that all tokens have the accuracy flag set
     for token_slot in range(ArmadaTypes.max_defense_tokens):
         offset = token_begin + token_slot * Encodings.hot_token_size
-        hot_token = enc_three_brace[0, offset:offset + Encodings.hot_token_size]
+        hot_token = enc_three_brace[offset:offset + Encodings.hot_token_size]
         if 1.0 == hot_token[green_offset]:
-            assert 1.0 == hot_token[-1] 
+            assert 1.0 == hot_token[acc_offset].item() 
         elif 1.0 == hot_token[red_offset]:
-            assert 1.0 == hot_token[-1] 
+            assert 1.0 == hot_token[acc_offset].item() 
         else:
-            assert 0.0 == hot_token[-1] 
+            assert 0.0 == hot_token[acc_offset].item() 
 
 
 def test_range_encodings():
@@ -298,21 +290,24 @@ def test_roll_encodings():
     attacker = ship.Ship(name="Attacker", template=ship_templates["Attacker"], upgrades=[], player_number=1)
     no_token = ship.Ship(name="No Defense Tokens", template=ship_templates["No Defense Tokens"], upgrades=[], player_number=2)
 
-    dice_begin = 2 * 5 + Encodings.hot_token_size * ArmadaTypes.max_defense_tokens + token_types + len(ArmadaTypes.ranges)
+    dice_begin = 2*(len(ArmadaTypes.hull_zones) + 1) + len(ArmadaTypes.defense_tokens) + Encodings.hot_token_size * ArmadaTypes.max_defense_tokens + len(ArmadaTypes.ranges)
+
+    assert (dice_begin == (Encodings.calculateAttackSize() - Encodings.max_die_slots *
+            Encodings.hot_die_size))
 
     # Do 100 trials to ensure everything is working as expected
     _, world_state = make_encoding(attacker, no_token, "short", agent)
     for _ in range(100):
         pool_colors, pool_faces = attacker.roll("front", "short")
-        attack_dict = world_state.attack
-        attack_dict["pool_faces"] = pool_faces
-        attack_dict["pool_colors"] = pool_colors
+        attack = world_state.attack
+        attack.pool_faces = pool_faces
+        attack.pool_colors = pool_colors
         # Count which items are matched to check if they are all encoded
         matched_dice = [0] * len(pool_faces)
-        world_state.updateAttack(attack_dict)
+        world_state.updateAttack(attack)
         # Make a random roll and encode the attack state
         # [ color - 3, face - 6]
-        enc_attack = agent.encodeAttackState(world_state)[0]
+        enc_attack = agent.encodeAttackState(world_state)[0][0]
         # Try to find a match for each color,face pair
         for slot in range(Encodings.max_die_slots):
             begin = dice_begin + slot * Encodings.hot_die_size

@@ -92,10 +92,10 @@ class ArmadaModel(nn.Module):
         # numbers. As a first pass though, we will see if rounding suffices.
         layers = nn.Sequential(
                 nn.Linear(input_size, 2 * input_size),
-                nn.BatchNorm1d(2 * input_size),
-                nn.ReLU(),
+                #nn.BatchNorm1d(2 * input_size),
+                #nn.ReLU(),
                 nn.Linear(2 * input_size, 4 * output_size),
-                nn.BatchNorm1d(4 * output_size),
+                #nn.BatchNorm1d(4 * output_size),
                 nn.ReLU(),
                 nn.Linear(4 * output_size, output_size),
                 )

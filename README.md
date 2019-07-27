@@ -1,8 +1,8 @@
 __Changes__
 * Added the beginnings of a learning agent
 * * A model is actually trained to predict the turns until a ship is destroyed
-* * Outputs are present for the actual defense token usage, but they currently do nothing
 * * Currently this is just supervised learning
+* * Outputs are present for the defense tokens, but loss is not propagated so actions are arbitrary
 
 __Current State__
 * Can encode the attack state part of the world model for use with a neural network
@@ -27,8 +27,9 @@ __TODOs__
     loss) but for other predictions this will not be the case.
 * * Some network tuning could be done now to make the prediction better, and we should make a subset
     of the ships be for training and another set be for evaluation
-* Have a test for attacking with defense tokens, should have more to cover new functionality.
+* * The model can't predict that a ship will be destroyed when the roll will definately destroy it
 * Train a model to use the defense tokens
+* * Need to actually propagate loss for the defense token spending.
 * Upgrades
 * Location, movement, etc
 * Command dials

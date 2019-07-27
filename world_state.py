@@ -7,28 +7,90 @@
 # game phase, object attributes, etc.
 #
 
+from game_constants import (ArmadaPhases, ArmadaTypes)
+
 class AttackState:
     """The state of a single attack."""
 
-    def __init__(self, attack_range, defender, defending_hull, pool_colors, pool_faces):
+    def __init__(self, attack_range, attacker, attacking_hull, defender, defending_hull,
+            pool_colors, pool_faces):
         self.range = attack_range
+        self.attacker = attacker
+        self.attacking_hull = attacking_hull
         self.defender = defender
         self.defending_hull = defending_hull
         self.pool_colors = pool_colors
         self.pool_faces = pool_faces
         # Keep track of which tokens are spent.
         # Tokens cannot be spent multiple times in a single attack.
-        self.spent_tokens = {},
+        self.spent_tokens =  [False] * len(defender.defense_tokens)
+        self.spent_types = [False] * len(ArmadaTypes.defense_tokens)
         # A token targeted with an accuracy cannot be spent.
-        self.accuracy_tokens = []
+        # A list of indices of tokens that were the target of an accuracy.
+        self.accuracy_tokens = [False] * len(defender.defense_tokens)
+
+    def flip_token(self, index):
+        """
+        Flip a defense token from green to red or discard it if it is red.
+
+        Args:
+            index (int): Index of the token to flip or discard
+
+        Returns:
+            bool: True if the token remains, false otherwise
+        """
+        tcolor, ttype = tuple(self.defender.defense_tokens[index].split(' '))
+        if 'green' == tcolor:
+            self.defender.defense_tokens[index] = 'red ' + ttype
+            return True
+        else:
+            # Token is red if it is not green, so discard it instead of flipping
+            tokens = self.defender.defense_tokens
+            self.defender.defense_tokens = tokens[0:index] + tokens[index+1:]
+            self.spent_tokens = self.spent_tokens[0:index] + self.spent_tokens[index+1:]
+            self.accuracy_tokens = self.accuracy_tokens[0:index] + self.accuracy_tokens[index+1:]
+            return False
+
+    def defender_spend_token(self, index):
+        """
+        Mark a token as spent and change its color or discard it. This token cannot be spent again
+        during the attack.
+
+        Args:
+            index (int): Index of the token to spend.
+
+        Returns:
+            str: Token type
+        """
+        # Flip the token
+        _, ttype = tuple(self.defender.defense_tokens[index].split(' '))
+        if self.flip_token(index):
+            # Mark it as spent if it remains
+            self.spent_tokens[index] = True
+        self.spent_types[ArmadaTypes.defense_tokens.index(ttype)] = True
+        return ttype
+
+    def attacker_spend_token(self, index):
+        """
+        Mark a token as spent and change its color or discard it.
+
+        Args:
+            index (int): Index of the token to spend.
+        """
+        # Flip the token
+        self.flip_token(index)
+
+    def token_type_spent(self, token_type):
+        """Return true if the given token type has been spent in this attack."""
+        return self.spent_types[ArmadaTypes.defense_tokens.index(token_type)]
 
     def __str__(self):
         return str("Attack to {} at range {}: {}".format(self.defender, self.range,
-            self.pool_colors))
+            list(zip(self.pool_colors, self.pool_faces))))
 
     def __repr__(self):
         return str("Attack to {} at range {}: {}".format(self.defender, self.range,
-            self.pool_colors))
+            list(zip(self.pool_colors, self.pool_faces))))
 
 class WorldState:
     """Object with the complete game state."""
@@ -60,5 +122,5 @@ class WorldState:
         self.ships.append(ship)
         self.ship_players[ship] = player_number
 
-    def updateAttack(self, attack_dict):
-        self.attack = attack_dict
+    def updateAttack(self, attack_state):
+        self.attack = attack_state

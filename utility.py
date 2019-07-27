@@ -6,6 +6,17 @@ import csv
 def token_index(token, defender):
     return [idx for idx in range(len(defender.defense_tokens)) if token in defender.defense_tokens[idx]]
 
+def adjacent_hulls(hull_zone):
+    # TODO This does not handle huge ships
+    adjacent_map = {"left": ["rear", "front"],
+                    "front": ["left", "right"],
+                    "right": ["front", "rear"],
+                    "rear": ["right", "left"]
+                    }
+    if hull_zone not in adjacent_map.keys():
+        raise Exception("Unknown hull zone given to adjacent_hulls function.")
+    return adjacent_map[hull_zone]
+
 # Array of matching token indexes with greenest tokens first
 def greenest_token_index(token, defender):
     greens = []
@@ -17,12 +28,14 @@ def greenest_token_index(token, defender):
             reds.append(idx)
     return greens + reds
 
-# Return the index of the first, greenest token of the given type that can be spent.
 def greenest_token(name, defender, accuracy_tokens):
-    green_tokens = [idx for idx in token_index('green {}'.format(name), defender) if not idx in
-            accuracy_tokens]
-    red_tokens = [idx for idx in token_index('red {}'.format(name), defender) if not idx in
-            accuracy_tokens]
+    """Return the index of the first, greenest token of the given type that can be spent.
+
+    TODO Need to also return a token that has not been spent
+    
+    """
+    green_tokens = [idx for idx in token_index('green {}'.format(name), defender) if not accuracy_tokens[idx]]
+    red_tokens = [idx for idx in token_index('red {}'.format(name), defender) if not accuracy_tokens[idx]]
     if green_tokens or red_tokens:
         return green_tokens[0] if green_tokens else red_tokens[0]
     else:

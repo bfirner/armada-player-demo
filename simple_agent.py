@@ -38,10 +38,10 @@ class SimpleAgent(BaseAgent):
         assert world_state.full_phase == "attack - resolve attack effects"
 
         attack = world_state.attack
-        defender = attack['defender']
-        pool_colors = attack['pool_colors']
-        pool_faces = attack['pool_faces']
-        spent_tokens = attack['spent_tokens']
+        defender = attack.defender
+        pool_colors = attack.pool_colors
+        pool_faces = attack.pool_faces
+        spent_tokens = attack.spent_tokens
 
         # Very simple agent. We will just go through a few simple rules.
 
@@ -94,7 +94,7 @@ class SimpleAgent(BaseAgent):
         # Mon-Mothma for the simple agent)
         # 2) If there are enough accuracies to cover everything else then just cover them
         # 3) Otherwise try to cover the more effective token, either braces first or evades first
-        if 'short' == attack['range']:
+        if 'short' == attack.range:
             for idx in braces:
                 if acc_index < len(accuracies):
                     targets.append(("accuracy", accuracies[acc_index], idx))
@@ -141,11 +141,11 @@ class SimpleAgent(BaseAgent):
         assert world_state.full_phase == "attack - spend defense tokens"
 
         attack = world_state.attack
-        defender = attack['defender']
-        pool_colors = attack['pool_colors']
-        pool_faces = attack['pool_faces']
-        spent_tokens = attack['spent_tokens']
-        accuracy_tokens = attack['accuracy_tokens']
+        defender = attack.defender
+        pool_colors = attack.pool_colors
+        pool_faces = attack.pool_faces
+        spent_tokens = attack.spent_tokens
+        accuracy_tokens = attack.accuracy_tokens
 
         # Very simple agent. We will just go through a few simple rules.
 
@@ -154,7 +154,7 @@ class SimpleAgent(BaseAgent):
             return None, None
 
         # No need to spend any more tokens if we have already scattered
-        if 'scatter' in spent_tokens:
+        if attack.token_type_spent('scatter'):
             return (None, None)
 
         # Scatter has highest priority. Note that it may be smarter to evade an
@@ -165,26 +165,26 @@ class SimpleAgent(BaseAgent):
             return (scatter, None)
 
         evade = greenest_token("evade", defender, accuracy_tokens)
-        if not 'evade' in spent_tokens and None != evade:
+        if not attack.token_type_spent('evade') and None != evade:
             # If the range is long we can evade the die with the largest damage.
             # The best action is actually more complicated because removing a die may
             # not be necessary if we will brace and the current damage is an even
             # number. However, it may still be useful in that case to remove a critical
             # face. We will leave handling things like that to a smarter system.
-            if 'short' != attack['range']:
+            if 'short' != attack.range:
                 return (evade, max_damage_index(pool_faces))
                 # If we made it here then there were no dice worth cancelling or rerolling.
 
         # Brace if damage > 1
         brace = greenest_token("brace", defender, accuracy_tokens)
-        if not 'brace' in spent_tokens and None != brace and 1 < ArmadaDice.pool_damage(pool_faces):
+        if not attack.token_type_spent('brace') and None != brace and 1 < ArmadaDice.pool_damage(pool_faces):
             return (brace, None)
 
         # Redirect to preserve shields
         # Should really check adjacent shields and figure out what to redirect, but we will leave that
         # to a smarter agent.
         redirect = greenest_token("redirect", defender, accuracy_tokens)
-        if not 'redirect' in spent_tokens and None != redirect and 0 < ArmadaDice.pool_damage(pool_faces):
+        if not attack.token_type_spent('redirect') and None != redirect and 0 < ArmadaDice.pool_damage(pool_faces):
             # TODO Now handle redirect
             pass
 

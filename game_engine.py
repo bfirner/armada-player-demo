@@ -3,6 +3,7 @@
 import logging
 
 from dice import ArmadaDice
+from game_constants import (ArmadaTypes)
 from world_state import (AttackState, WorldState)
 
 
@@ -26,25 +27,13 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
 
     attack_ship, attack_hull = attacker[0], attacker[1]
     pool_colors, pool_faces = attack_ship.roll(attack_hull, attack_range)
-    attack_dict = {
-        'range': attack_range,
-        'attacker': attacker[0],
-        'attacking zone': attacker[1],
-        'defender': defender[0],
-        'defending zone': defender[1],
-        'pool_colors': pool_colors,
-        'pool_faces': pool_faces,
-        # Keep track of which tokens are spent.
-        # Tokens cannot be spent multiple times in a single attack.
-        'spent_tokens': {},
-        # A token targeted with an accuracy cannot be spent.
-        'accuracy_tokens': []
-    }
-    world_state.updateAttack(attack_dict)
+    attack = AttackState(attack_range, attacker[0], attacker[1], defender[0], defender[1], pool_colors, pool_faces)
+    world_state.updateAttack(attack)
 
 
-    spent_tokens = world_state.attack['spent_tokens']
-    acc_tokens = world_state.attack['accuracy_tokens']
+    spent_tokens = world_state.attack.spent_tokens
+    spent_types = world_state.attack.spent_types
+    acc_tokens = world_state.attack.accuracy_tokens
     redirect_hull = None
     redirect_amount = None
 
@@ -94,24 +83,16 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
     token, token_targets = defensive_agent.handle(world_state)
     while None != token and token < len(defender[0].defense_tokens):
         # Spend the token and resolve the effect
-        token_type = spend(token, defender[0])
+        token_type = world_state.attack.defender_spend_token(token)
         # TODO If a token has already been spent it cannot be spent again, we should enforce that here.
-        if "brace" in token_type:
-            spent_tokens['brace'] = True
-        elif "scatter" in token_type:
-            spent_tokens['scatter'] = True
-        elif "contain" in token_type:
-            spent_tokens['contain'] = True
-        elif "redirect" in token_type:
-            spent_tokens['redirect'] = True
+        if "redirect" == token_type:
             redirect_hull, redirect_amount = token_targets
-        elif "evade" in token_type:
+        elif "evade" == token_type:
             # Need to evade a specific die
             die_index = token_targets
             if die_index >= len(pool_colors):
                 print("Warning: could not find specified evade token target.")
             else:
-                spent_tokens['evade'] = True
                 if 'long' == attack_range:
                     # Remove the die
                     pool_colors = pool_colors[:die_index] + pool_colors[die_index+1:]
@@ -119,8 +100,8 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
                 elif 'medium' == attack_range:
                     # Reroll the die
                     pool_faces[die_index] = ArmadaDice.random_roll(pool_colors[die_index])
-                world_state.attack['pool_colors'] = pool_colors
-                world_state.attack['pool_faces'] = pool_faces
+                world_state.attack.pool_colors = pool_colors
+                world_state.attack.pool_faces = pool_faces
         # See if the agent will spend another defense token
         token, token_targets = defensive_agent.handle(world_state)
 
@@ -129,26 +110,31 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
     # Now calculate the damage done to the defender
     # Apply effect on the entire attack at this point
     damage = ArmadaDice.pool_damage(pool_faces)
-    if 'scatter' in spent_tokens:
+    if spent_types[ArmadaTypes.defense_tokens.index('scatter')]:
         damage = 0
 
-    if 'brace' in spent_tokens:
+    if spent_types[ArmadaTypes.defense_tokens.index('brace')]:
         damage = damage // 2 + damage % 2
 
-    if 'redirect' in spent_tokens:
+    if spent_types[ArmadaTypes.defense_tokens.index('redirect')]:
         # Redirect to the target hull zone, but don't redirect more damage than is present
         redirect_amount = min(damage, redirect_amount)
         defender[0].damage(redirect_hull, redirect_amount)
+        # TODO Need to remember if damage was directed to the hull
+        # Reduce the damage left
         damage = damage - redirect_amount
-        world_state.attack['{} damage'.format(redirect_hull)] = redirect_amount
+
+    # TODO FIXME Handle criticals and the contain token
 
     # Deal remaining damage to the defender
-    world_state.attack['{} damage'.format(defender[1])] = damage
+    # TODO FIXME HERE
+    #world_state.attack['{} damage'.format(defender[1])] = damage
     defender[0].damage(defender[1], damage)
 
+    # TODO The actual actions taken should be logged with the world_state
     # TODO Log the world state into a game log
     logging.info(world_state)
 
     # Clear the attack-only states and return the world state with modified ship status
-    world_state.attack = {}
+    world_state.attack = None
     return world_state
