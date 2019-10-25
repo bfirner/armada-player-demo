@@ -89,6 +89,12 @@ class Ship:
             # Insert a green token for each available token
             for _ in range(self.attributes[token]):
                 self.defense_tokens.append("green " + token[offset:].lower())
+        # Tokens spent in a spend defense tokens phase
+        self.spent_tokens =  [False] * len(self.defense_tokens)
+
+    def leave_spend_defense_tokens(self):
+        """No tokens should be in the spent state outside of this phase."""
+        self.spent_tokens =  [False] * len(self.defense_tokens)
 
     def roll(self, zone, distance):
         """

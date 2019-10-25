@@ -77,8 +77,20 @@ ship_names = [name for name in ship_templates.keys()]
 # > d = torch.distributions(mean, sigma)
 # > loss = -d.log_prob(result)
 
-# Create a learning agent. This will initial the model.
+# Create a learning agent. This will initialize the model.
 prediction_agent = LearningAgent(ArmadaModel())
+
+# We will also create two more models to use for random distillation.
+# The first random model will remain static and the second will be learn to predict the outputs of
+# the first. The difference between the two outputs will be used to estimate the novelty of the
+# current state. If the state is new then the second model will not be able to make a good
+# prediction of the first model's outputs.
+# In other words, the first model projects the inputs into a new latent space. The ability of the
+# second model to predict the projection into the latent space should be correlated to how similar
+# this state is to ones we have previously visited.
+static_network = ArmadaModel().to(prediction_agent.device)
+novelty_network = ArmadaModel().to(prediction_agent.device)
+novelty_optimizer = novelty_network.get_optimizer("def_tokens")
 
 # Load a previously trained model for additional training
 if os.path.isfile("defense_token_model.checkpoint"):
@@ -127,14 +139,14 @@ while len(examples) < 3000:
             # Get the (state, action) pairs back
             state_action_pairs = prediction_agent.returnStateActions()
             state_actions.append(state_action_pairs)
-            logging.info("\t roll {}, estimate {}".format(num_rolls, state_action_pairs[0][1][-2]))
+            logging.info("\t roll {}, estimate {}".format(num_rolls, state_action_pairs[0][2][-2]))
         # Pair the lifetimes with the (state, action) pairs and push them into the examples list
         for roll_idx, state_action_pairs in enumerate(state_actions):
             # Have the prediction terminate at 0 so subtract an additional 1
             lifetime = num_rolls - roll_idx - 1
             for state_action_pair in state_action_pairs:
-                examples.append((state_action_pair[0], state_action_pair[1], lifetime))
-                batch_out.append(state_action_pair[1][-2:].view(2, 1))
+                examples.append((state_action_pair[0], state_action_pair[1], state_action_pair[2], lifetime))
+                batch_out.append(state_action_pair[2][-2:].view(2, 1))
                 batch_target.append(torch.tensor([[lifetime]], dtype=torch.float))
 
                 if 0 == len(examples) % 1000:
@@ -142,7 +154,7 @@ while len(examples) < 3000:
 
                 if 0 == len(examples) % 32:
                     # Train on the last 32. This isn't a great way to do things since the samples
-                    # in each batch will be biased. This is just a first pass.
+                    # in each batch will be correlated. This is just a first pass.
                     # Grab the last 2 output for the mean and variance prediction
                     out_tensor = torch.cat(tuple(batch_out), 1).to(prediction_agent.device)
                     target_tensor = torch.cat(tuple(batch_target), 1).to(prediction_agent.device)
@@ -151,9 +163,37 @@ while len(examples) < 3000:
                     # Normal distribution:
                     #normal = torch.distributions.normal.Normal(out_tensor[0], out_tensor[1])
                     #loss = -normal.log_prob(target_tensor)
-                    # Poisson distribution
+                    # Poisson distribution (works well)
                     poisson = torch.distributions.poisson.Poisson(out_tensor[0])
                     loss = -poisson.log_prob(target_tensor)
+                    # Binomial distribution (works poorly)
+                    #binomial = torch.distributions.binomial.Binomial(out_tensor[0], out_tensor[1])
+                    #loss = -binomial.log_prob(target_tensor)
+                    # Geometric distribution (works poorly)
+                    #geometric = torch.distributions.geometric.Geometric(out_tensor[0].abs())
+                    #loss = -geometric.log_prob(target_tensor)
+
+
+                    # Novelty prediction
+                    # Project the observed states
+                    #latent_projection = static_network.forward("def_tokens", state_action_pair[1])
+                    # Check the novelty
+                    #predicted_projection = novelty_network.forward("def_tokens", state_action_pair[1])
+                    #with torch.no_grad():
+                    #    novelty = (predicted_projection - latent_projection).abs()
+                    # Update the observer network using absolute error
+                    #novelty_optimizer.zero_grad()
+                    #(predicted_projection - latent_projection).abs().sum().backward()
+                    #novelty_optimizer.step()
+
+                    # Incorporate the novelty into the loss of the model. We will use the inverse
+                    # square root of the mean absolute novelty.
+                    # A gradient exists from these projections back to the policy model through the
+                    # policy's output vector
+                    #novelty_loss = 1.0 / (predicted_projection - latent_projection).abs().mean(1).pow(0.5)
+                    #loss = loss + 
+
+                    # Update the policy network
                     optimizer.zero_grad()
                     loss.abs().sum().backward()
                     optimizer.step()
@@ -164,8 +204,10 @@ while len(examples) < 3000:
 # Let's take a look at the last few predictions
 abs_error = 0
 for example in examples[-300:]:
-    print("predicted {} actually {}".format(example[1][-2], example[2]))
-    abs_error += abs(example[1][-2] - example[2])
+    print("predicted {} actually {}".format(example[2][-2], example[3]))
+    abs_error += abs(example[2][-2] - example[3])
+    if 0 == example[3]:
+        print("Final state was {}".format(example[0]))
 
 print("average absolute error: {}".format(abs_error/300.0))
 

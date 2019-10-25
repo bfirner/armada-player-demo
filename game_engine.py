@@ -31,7 +31,7 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
     world_state.updateAttack(attack)
 
 
-    spent_tokens = world_state.attack.spent_tokens
+    spent_tokens = world_state.attack.defender.spent_tokens
     spent_types = world_state.attack.spent_types
     acc_tokens = world_state.attack.accuracy_tokens
     redirect_hull = None

@@ -41,7 +41,7 @@ class SimpleAgent(BaseAgent):
         defender = attack.defender
         pool_colors = attack.pool_colors
         pool_faces = attack.pool_faces
-        spent_tokens = attack.spent_tokens
+        spent_tokens = attack.defender.spent_tokens
 
         # Very simple agent. We will just go through a few simple rules.
 
@@ -144,7 +144,7 @@ class SimpleAgent(BaseAgent):
         defender = attack.defender
         pool_colors = attack.pool_colors
         pool_faces = attack.pool_faces
-        spent_tokens = attack.spent_tokens
+        spent_tokens = attack.defender.spent_tokens
         accuracy_tokens = attack.accuracy_tokens
 
         # Very simple agent. We will just go through a few simple rules.

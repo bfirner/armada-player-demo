@@ -48,97 +48,6 @@ class LearningAgent(BaseAgent):
         self.remembering = False
         return results
 
-    def encodeAttackState(self, world_state):
-        """
-        Args:
-            world_state (WorldState) : Current world state
-        Returns:
-            (torch.Tensor)           : Encoding of the world state used as network input.
-            (List[int])              : Token slot mapping (source to encoding index)
-            (List[int])              : Die slot mapping (source to encoding index)
-        """
-        encoding = torch.zeros(1, self.attack_enc_size).to(self.device)
-
-        # Now populate the tensor
-        attack = world_state.attack
-        defender = attack.defender
-        attacker = attack.attacker
-
-        # Hull zones will of course increase with huge ships
-        # Future proof this code by having things basing math upon the length of this table
-        hull_zones = ArmadaTypes.hull_zones
-
-        cur_offset = 0
-
-        # Attacker shields and hull
-        for offset, zone in enumerate(hull_zones):
-            encoding[0, cur_offset + offset] = attacker.shields[zone]
-        encoding[0, cur_offset + len(hull_zones)] = attacker.hull()
-        cur_offset += len(hull_zones) + 1
-
-        # Defender shields and hull
-        for offset, zone in enumerate(hull_zones):
-            encoding[0, 6 + offset] = defender.shields[zone]
-        encoding[0, cur_offset + len(hull_zones)] = defender.hull()
-        cur_offset += len(hull_zones) + 1
-
-        # Defense tokens
-
-        # Spent tokens
-        for offset, token in enumerate(ArmadaTypes.defense_tokens):
-            encoding[0, cur_offset + offset] = 1 if attack.spent_types[offset] else 0
-        cur_offset += len(ArmadaTypes.defense_tokens)
-
-        # Hot encoding the defenders tokens
-        # Each hot encoding is: [type - 5, color - 2, accuracy targeted - 1, spent - 1]
-        token_slots = random.sample(range(ArmadaTypes.max_defense_tokens), len(defender.defense_tokens))
-        for token_idx, slot in enumerate(token_slots):
-            slot_offset = cur_offset + slot * Encodings.hot_token_size
-            # Process if the defender has a token for this slot
-            if token_idx < len(defender.defense_tokens):
-                token = defender.defense_tokens[token_idx]
-                # Encode the token type
-                for offset, ttype in enumerate(ArmadaTypes.defense_tokens):
-                    encoding[0, slot_offset + offset] = 1 if ttype in token else 0
-                slot_offset = slot_offset + len(ArmadaTypes.defense_tokens)
-                # Encode the token color
-                for offset, color in enumerate(ArmadaTypes.token_colors):
-                    encoding[0, slot_offset + offset] = 1 if color == token[0:len(color)] else 0
-                slot_offset = slot_offset + len(ArmadaTypes.token_colors)
-                # Encode whether an accuracy has been spent on this token
-                encoding[0, slot_offset] = 1 if attack.accuracy_tokens[token_idx] else 0
-                # Encode if this particular token has been spent
-                encoding[0, slot_offset + 1] = 1 if attack.spent_tokens[token_idx] else 0
-
-        # Move the current encoding offset to the position after the token section
-        cur_offset += Encodings.hot_token_size * ArmadaTypes.max_defense_tokens
-
-        # Attack range
-        for offset, arange in enumerate(ArmadaTypes.ranges):
-            encoding[0, cur_offset + offset] = 1 if arange == attack.range else 0
-        cur_offset += len(ArmadaTypes.ranges)
-
-        # Each die will be represented with a hot_die_size vector
-        # There are max_die_slots slots for these, and we will fill them in randomly
-        # During training we want the model to react properly to a die in any location in the
-        # vector, so we randomize the dice locations so that the entire vector is used (otherwise
-        # the model would be poorly trained for rolls with a very large number of dice)
-        die_slots = random.sample(range(Encodings.max_die_slots), len(attack.pool_colors))
-        for die_idx, slot in enumerate(die_slots):
-            slot_offset = cur_offset + slot * Encodings.hot_die_size
-            # Encode die colors
-            for offset, color in enumerate(ArmadaDice.die_colors):
-                encoding[0, slot_offset + offset] = 1 if color == attack.pool_colors[die_idx] else 0
-            slot_offset += len(ArmadaDice.die_colors)
-            # Encode die faces
-            for offset, face in enumerate([face for face in ArmadaDice.die_faces.keys()]):
-                encoding[0, slot_offset + offset] = 1 if face == attack.pool_faces[die_idx] else 0
-
-        # Sanity check on the encoding size and the data put into it
-        assert encoding.size(1) == cur_offset + Encodings.hot_die_size * Encodings.max_die_slots
-
-        return encoding, token_slots, die_slots
-
     # This agent deals with the "resolve attack effects" step.
     def resolveAttackEffects(self, world_state):
         """
@@ -185,11 +94,12 @@ class LearningAgent(BaseAgent):
             # Return no action
             return None, None
         # Encode the state, forward through the network, decode the result, and return the result.
-        as_enc, token_slots, die_slots = self.encodeAttackState(world_state)
+        as_enc, token_slots, die_slots = Encodings.encodeAttackState(world_state)
+        as_enc.to(self.device)
         action = self.model.forward("def_tokens", as_enc)[0]
         # Remember this state action pair if in memory mode
         if self.remembering:
-            self.memory.append((as_enc, action))
+            self.memory.append((world_state.attack, as_enc, action))
         # Don't return the lifetime prediction (used in train_defense_tokens.py)
         #with torch.no_grad():
         #    action = torch.round(action[:Encodings.calculateSpendDefenseTokensSize()])
