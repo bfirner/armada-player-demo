@@ -96,10 +96,19 @@ class LearningAgent(BaseAgent):
         # Encode the state, forward through the network, decode the result, and return the result.
         as_enc, token_slots, die_slots = Encodings.encodeAttackState(world_state)
         as_enc.to(self.device)
-        action = self.model.forward("def_tokens", as_enc)[0]
-        # Remember this state action pair if in memory mode
-        if self.remembering:
-            self.memory.append((world_state.attack, as_enc, action))
+        if not self.model.with_novelty:
+            action = self.model.forward("def_tokens", as_enc)[0]
+            # Remember this state action pair if in memory mode
+            if self.remembering:
+                self.memory.append((world_state.attack, as_enc, action))
+        else:
+            action, novelty = self.model.forward("def_tokens", as_enc)
+            # Remove the batch dimension
+            action = action[0]
+            novelty = novelty[0]
+            # Remember this state action pair if in memory mode
+            if self.remembering:
+                self.memory.append((world_state.attack, as_enc, action, novelty))
         # Don't return the lifetime prediction (used in train_defense_tokens.py)
         #with torch.no_grad():
         #    action = torch.round(action[:Encodings.calculateSpendDefenseTokensSize()])

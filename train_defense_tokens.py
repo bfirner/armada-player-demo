@@ -7,6 +7,7 @@ from ship import (Ship)
 from game_constants import (ArmadaPhases, ArmadaTypes)
 from learning_agent import (LearningAgent)
 
+from enum import Enum
 import logging
 import numpy
 import os
@@ -23,11 +24,49 @@ from model import (ArmadaModel)
 from simple_agent import (SimpleAgent)
 from world_state import (WorldState)
 
+parser = argparse.ArgumentParser(
+    description='Learn how to spend defense tokens to maximize survival.',
+                formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument(
+    '-e',
+    '--evaluate',
+    action='store_true',
+    default=False,
+    required=False,
+    help='Skip training, only evaluate. (not implemented)')
+parser.add_argument(
+    '--simruns',
+    default=3000,
+    required=False,
+    type=int,
+    help='Number of simulated battles to use for training.')
+parser.add_argument(
+    '--shipfile',
+    default="data/test_ships.csv",
+    required=False,
+    type=str,
+    help='csv file with ship templates.')
+parser.add_argument(
+    '-f',
+    '--filename',
+    default='defense_token_model.checkpoint',
+    required=False,
+    type=str,
+    help='Checkpoint filename (for loading and saving).')
+parser.add_argument(
+    '--novelty',
+    default=False,
+    required=False,
+    action='store_true',
+    help="Attempt to use novelty-explorated instead of random. Does not currently work.")
+args = parser.parse_args()
+
 
 # Seed with time or a local source of randomness
 random.seed()
 
-keys, ship_templates = utility.parseShips('data/armada-ship-stats.csv')
+#keys, ship_templates = utility.parseShips('data/armada-ship-stats.csv')
+keys, ship_templates = utility.parseShips('data/test_ships.csv')
 
 ship_names = [name for name in ship_templates.keys()]
 
@@ -78,41 +117,154 @@ ship_names = [name for name in ship_templates.keys()]
 # > loss = -d.log_prob(result)
 
 # Create a learning agent. This will initialize the model.
-prediction_agent = LearningAgent(ArmadaModel())
-
-# We will also create two more models to use for random distillation.
-# The first random model will remain static and the second will be learn to predict the outputs of
-# the first. The difference between the two outputs will be used to estimate the novelty of the
-# current state. If the state is new then the second model will not be able to make a good
-# prediction of the first model's outputs.
-# In other words, the first model projects the inputs into a new latent space. The ability of the
-# second model to predict the projection into the latent space should be correlated to how similar
-# this state is to ones we have previously visited.
-static_network = ArmadaModel().to(prediction_agent.device)
-novelty_network = ArmadaModel().to(prediction_agent.device)
-novelty_optimizer = novelty_network.get_optimizer("def_tokens")
+prediction_agent = LearningAgent(ArmadaModel(with_novelty=args.novelty))
 
 # Load a previously trained model for additional training
-if os.path.isfile("defense_token_model.checkpoint"):
-    prediction_agent.model.load("defense_token_model.checkpoint")
+# TODO FIXME HERE Reloading with the new novelty training stuff is not working
+if os.path.isfile(args.filename):
+    prediction_agent.model.load(args.filename)
 
 optimizer = prediction_agent.model.get_optimizer("def_tokens")
+if args.novelty:
+    novelty_optimizer = prediction_agent.model.get_optimizer("def_tokens_novelty")
 examples = []
-batch_out = []
+prediction_params = []
 batch_target = []
+novelties = []
 loss_fn = torch.nn.MSELoss()
+
+class TrainState(Enum):
+    POLICY=1
+    PREDICTION=2
+    NOVELTY=3
+
+# Start with prediction training in the training loop
+train_state = TrainState.PREDICTION
+
+# Keep track of novelty for debugging purposes
+running_novelty = 0.
+
+# Random action probability
+# TODO Once we begin training a policy network this should more towards 0 as training progresses.
+random_likelihood = 1.0
+
+def random_training(predict_tensor, target_tensor, optimizer):
+    """Training based upon random actions.
+
+    Trains the DNN to predict the target labels after taking random actions to explore the space.
+
+    Args:
+        predict_tensor (torch.Tensor) : The lifetime prediction tensor
+        target_tensor (torch.Tensor)  : Target labels
+        optimizer (torch.nn.Optimizer): Model optimizer
+    """
+    pass
+
+def novelty_training(predict_tensor, target_tensor, novelties, running_novelty,
+                     optimizer, novelty_optimizer, train_state):
+    """Novelty-based training.
+    
+    Arguments:
+        predict_tensor (torch.Tensor) : The lifetime prediction tensor
+        target_tensor (torch.Tensor)  : Target labels
+        novelties (torch.Tensor)      : Novelty tensor
+        running_novelty (float)       : Running novelty (for debugging)
+        optimizer (torch.nn.Optimizer): Model optimizer
+        train_state (TrainState)      : Training state
+    """
+    # Alternate between training the lifetime prediction and novelty networks and
+    # training the policy network.
+    if TrainState.POLICY == train_state:
+        # Policy network
+        # TODO The policy network really should not be shown too many examples from
+        # the same match up, only one example from a matchup should be shown during
+        # a batch.
+
+        # Traditional loss:
+        # err = loss_fn(predict_tensor, target_tensor)
+        # No gradient update for the predictor, just train the policy based upon the
+        # eventual lifetime
+
+        # Update the policy network
+        optimizer.zero_grad()
+        #loss = something
+        loss.abs().sum().backward()
+        optimizer.step()
+
+        # Next loop train prediction
+        train_state = TrainState.PREDICTION
+    elif TrainState.PREDICTION == train_state:
+        # Train the lifetime prediction network
+
+        # Life time prediction
+        # The output cannot be negative, run through a ReLU to clean that up
+        f = torch.nn.ReLU()
+        epsilon = 0.001
+        predictions = f(predict_tensor[0]) + epsilon
+        # Normal distribution:
+        #normal = torch.distributions.normal.Normal(predict_tensor[0], predict_tensor[1])
+        #loss = -normal.log_prob(target_tensor)
+        # Poisson distribution (works well)
+        poisson = torch.distributions.poisson.Poisson(predictions)
+        loss = -poisson.log_prob(target_tensor)
+        # Binomial distribution (works poorly)
+        #binomial = torch.distributions.binomial.Binomial(predict_tensor[0], predict_tensor[1])
+        #loss = -binomial.log_prob(target_tensor)
+        # Geometric distribution (works poorly)
+        #geometric = torch.distributions.geometric.Geometric(predict_tensor[0].abs())
+        #loss = -geometric.log_prob(target_tensor)
+        optimizer.zero_grad()
+        loss.sum().backward()
+        optimizer.step()
+
+        # Next loop train novelty
+        train_state = TrainState.NOVELTY
+
+    elif TrainState.NOVELTY == train_state:
+        # Train the lifetime prediction and novelty networks
+        # TODO FIXME HERE Why are the novelties dimensionality 29? Isn't novelty 1D?
+        novelties_tensor = torch.stack(tuple(novelties)).to(prediction_agent.device)
+        # TODO FIXME HERE Novelty keeps going up forever! Argh!
+
+        # Novelty prediction
+        # Update policy network to push it into higher novelty. Also update the
+        # novelty network to recognize this state.
+        # Higher novelty trends towards 0 loss for the policy network.
+        # The novelty knob sets an absolute maximum penalty and should probably
+        # be adjusted over the course of training.
+        novelty_knob = 0.01
+        novelty_penalty = 1.0 / (novelties_tensor.sum() + novelty_knob)
+        loss = novelty_penalty
+        # The novelty penalty should be used to update the policy network
+        # Lifetime prediction
+        # Update the observer network using the novelty penalty
+        novelty_optimizer.zero_grad()
+        loss.sum().backward()
+        #
+        #novelties_tensor.sum().backward()
+
+        novelty_optimizer.step()
+
+        # Weighted average of running novelty (for logging)
+        with torch.no_grad():
+            running_novelty = 0.1 * novelties_tensor.sum() + 0.9 * running_novelty
+
+        # Next loop train prediction (skipping policy for now)
+        train_state = TrainState.PREDICTION
+
 
 # Set up logging to track what happens during training.
 logging.basicConfig(filename='training.log',level=logging.WARN)
 
 print("Collecting examples.")
-while len(examples) < 3000:
+while len(examples) < args.simruns:
     attack_range = random.choice(ArmadaTypes.ranges)
     attack_hull = random.choice(ArmadaTypes.hull_zones)
     defend_hull = random.choice(ArmadaTypes.hull_zones)
     attacker_name = random.choice(ship_names)
     defender_name = random.choice(ship_names)
 
+    # TODO FIXME HERE it looks like if a ship is re-used it does not get its hull and shields back!
     attacker = ship.Ship(name=attacker_name, template=ship_templates[attacker_name], upgrades=[], player_number=1)
     defender = ship.Ship(name=defender_name, template=ship_templates[defender_name], upgrades=[], player_number=2)
 
@@ -132,6 +284,7 @@ while len(examples) < 3000:
             # In this initial version of the code the prediction agent won't actually take any
             # actions but we need it to log the (attack_state, action) pairs
             prediction_agent.rememberStateActions()
+            # TOOD FIXME HERE For random training sometimes the agents should be random agents.
             world_state = handleAttack(world_state=world_state, attacker=(attacker, attack_hull),
                                        defender=(defender, defend_hull), attack_range=attack_range,
                                        offensive_agent=prediction_agent,
@@ -139,15 +292,28 @@ while len(examples) < 3000:
             # Get the (state, action) pairs back
             state_action_pairs = prediction_agent.returnStateActions()
             state_actions.append(state_action_pairs)
-            logging.info("\t roll {}, estimate {}".format(num_rolls, state_action_pairs[0][2][-2]))
+            if args.novelty:
+                logging.info("\t roll {}, estimate {}, novelty {}".format(num_rolls,
+                    state_action_pairs[0][2][-2], state_action_pairs[0][3]))
+            else:
+                logging.info("\t roll {}, estimate {}".format(num_rolls,
+                    state_action_pairs[0][2][-2]))
         # Pair the lifetimes with the (state, action) pairs and push them into the examples list
         for roll_idx, state_action_pairs in enumerate(state_actions):
             # Have the prediction terminate at 0 so subtract an additional 1
             lifetime = num_rolls - roll_idx - 1
             for state_action_pair in state_action_pairs:
                 examples.append((state_action_pair[0], state_action_pair[1], state_action_pair[2], lifetime))
-                batch_out.append(state_action_pair[2][-2:].view(2, 1))
+                prediction_params.append(state_action_pair[2][-2:].view(2, 1))
                 batch_target.append(torch.tensor([[lifetime]], dtype=torch.float))
+                if args.novelty:
+                    novelties.append(state_action_pair[3])
+
+                # Don't use the prediction part of the tensor for novelty, we only want to change
+                # the policy
+
+                if 0 == len(examples) % 500:
+                    print("Running novelty is {}".format(running_novelty))
 
                 if 0 == len(examples) % 1000:
                     print("{} examples collected.".format(len(examples)))
@@ -156,50 +322,26 @@ while len(examples) < 3000:
                     # Train on the last 32. This isn't a great way to do things since the samples
                     # in each batch will be correlated. This is just a first pass.
                     # Grab the last 2 output for the mean and variance prediction
-                    out_tensor = torch.cat(tuple(batch_out), 1).to(prediction_agent.device)
+                    # TODO Take mean and variance out of the policy network
+                    predict_tensor = torch.cat(tuple(prediction_params), 1).to(prediction_agent.device)
                     target_tensor = torch.cat(tuple(batch_target), 1).to(prediction_agent.device)
-                    # Traditional loss:
-                    # err = loss_fn(out_tensor, target_tensor)
-                    # Normal distribution:
-                    #normal = torch.distributions.normal.Normal(out_tensor[0], out_tensor[1])
-                    #loss = -normal.log_prob(target_tensor)
-                    # Poisson distribution (works well)
-                    poisson = torch.distributions.poisson.Poisson(out_tensor[0])
-                    loss = -poisson.log_prob(target_tensor)
-                    # Binomial distribution (works poorly)
-                    #binomial = torch.distributions.binomial.Binomial(out_tensor[0], out_tensor[1])
-                    #loss = -binomial.log_prob(target_tensor)
-                    # Geometric distribution (works poorly)
-                    #geometric = torch.distributions.geometric.Geometric(out_tensor[0].abs())
-                    #loss = -geometric.log_prob(target_tensor)
 
+                    if args.novelty:
+                        # Incorporate the novelty into the loss of the model. We will use the inverse
+                        # square root of the mean absolute novelty.
+                        # A gradient exists from these projections back to the policy model through the
+                        # policy's output vector
+                        # Probably more complicated than is necessary.
+                        novelty_training(predict_tensor, target_tensor, novelties, running_novelty,
+                                         optimizer, novelty_optimizer, train_state)
+                    else:
+                        # Explore the space with random actions.
+                        random_training(predict_tensor, target_tensor, optimizer)
 
-                    # Novelty prediction
-                    # Project the observed states
-                    #latent_projection = static_network.forward("def_tokens", state_action_pair[1])
-                    # Check the novelty
-                    #predicted_projection = novelty_network.forward("def_tokens", state_action_pair[1])
-                    #with torch.no_grad():
-                    #    novelty = (predicted_projection - latent_projection).abs()
-                    # Update the observer network using absolute error
-                    #novelty_optimizer.zero_grad()
-                    #(predicted_projection - latent_projection).abs().sum().backward()
-                    #novelty_optimizer.step()
-
-                    # Incorporate the novelty into the loss of the model. We will use the inverse
-                    # square root of the mean absolute novelty.
-                    # A gradient exists from these projections back to the policy model through the
-                    # policy's output vector
-                    #novelty_loss = 1.0 / (predicted_projection - latent_projection).abs().mean(1).pow(0.5)
-                    #loss = loss + 
-
-                    # Update the policy network
-                    optimizer.zero_grad()
-                    loss.abs().sum().backward()
-                    optimizer.step()
                     # Clear for the next batch
-                    batch_out = []
+                    prediction_params = []
                     batch_target = []
+                    novelties = []
 
 # Let's take a look at the last few predictions
 abs_error = 0
@@ -212,4 +354,4 @@ for example in examples[-300:]:
 print("average absolute error: {}".format(abs_error/300.0))
 
 # Save the model
-prediction_agent.model.save("defense_token_model.checkpoint")
+prediction_agent.model.save(args.filename)
