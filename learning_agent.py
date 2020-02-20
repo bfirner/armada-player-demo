@@ -95,7 +95,7 @@ class LearningAgent(BaseAgent):
             return None, None
         # Encode the state, forward through the network, decode the result, and return the result.
         as_enc, token_slots, die_slots = Encodings.encodeAttackState(world_state)
-        as_enc.to(self.device)
+        as_enc = as_enc.to(self.device)
         if not self.model.with_novelty:
             action = self.model.forward("def_tokens", as_enc)[0]
             # Remember this state action pair if in memory mode
