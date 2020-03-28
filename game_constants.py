@@ -21,12 +21,24 @@ class ArmadaDimensions:
     # TODO Squad bases
 
 class ArmadaTypes:
-    defense_tokens = ["evade", "brace", "scatter", "contain", "redirect"]
+    defense_tokens = ["evade", "brace", "scatter", "contain", "redirect", "salvo"]
     token_colors = ["green", "red"]
     max_defense_tokens = 6
     ranges = ["short", "medium", "long"]
     # TODO Expand this for huge ships
     hull_zones = ["left", "right", "front", "rear"]
+    adjacent_hull_zones = {
+        "left": ("front", "rear"),
+        "right": ("front", "rear"),
+        "front": ("left", "right"),
+        "rear": ("left", "right")}
+    adjacent_huge_hull_zones = {
+        "left": ("front", "left-auxiliary"),
+        "right": ("front", "right-auxiliary"),
+        "left-auxiliary": ("left", "rear"),
+        "right-auxiliary": ("right", "rear"),
+        "front": ("left", "right"),
+        "rear": ("left-auxiliary", "right-auxiliary")}
 
 class ArmadaPhases:
     main_phases = [

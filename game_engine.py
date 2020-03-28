@@ -8,7 +8,8 @@ from world_state import (AttackState, WorldState)
 
 
 # TODO This function should eventually part of a larger system to handle game logic.
-def handleAttack(world_state, attacker, defender, attack_range, offensive_agent, defensive_agent):
+def handleAttack(world_state, attacker, defender, attack_range, offensive_agent, defensive_agent,
+                 state_log=None):
     """This function handles the attack sub-phase of the ship phase.
 
     Args:
@@ -18,18 +19,22 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
         attack_range (str) : "long", "medium", or "short". TODO Remove this once ships have locations.
         offensive_agent (BaseAgent) : An agent to handle actions on the offensive side.
         defensive_agent (BaseAgent) : An agent to handle actions on the defensive side.
+        state_log (StateActionLog)  : A logger for game states and actions.
     Returns:
         world_state (table) : The world state after the attack completes.
     """
     world_state.setPhase("attack", "")
 
-    # TODO Effects that occur before the attack should happen here (obstruction, Sato, etc)
+    # TODO Effects that occur before the roll should happen here (obstruction, Sato, etc)
 
     attack_ship, attack_hull = attacker[0], attacker[1]
     pool_colors, pool_faces = attack_ship.roll(attack_hull, attack_range)
     attack = AttackState(attack_range, attacker[0], attacker[1], defender[0], defender[1], pool_colors, pool_faces)
     world_state.updateAttack(attack)
 
+    # Log if the log is present
+    if state_log is not None:
+        state_log.append(('state', world_state.clone()))
 
     spent_tokens = world_state.attack.defender.spent_tokens
     spent_types = world_state.attack.spent_types
@@ -60,50 +65,101 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
 
     # TODO Roll the phase into the world state
     world_state.setSubPhase("resolve attack effects")
-    attack_effect_targets = offensive_agent.handle(world_state)
 
-    spent_dice = []
-    for effect_tuple in attack_effect_targets:
-        action = effect_tuple[0]
+    # Log if the log is present
+    if state_log is not None:
+        state_log.append(('state', world_state.clone()))
+
+    attack_effect_tuple = offensive_agent.handle(world_state)
+    # Log if the log is present
+    if state_log is not None:
+        state_log.append(('action', attack_effect_tuple))
+
+    # TODO FIXME The action and world state should be encoded and logged
+
+    while attack_effect_tuple is not None:
+        action = attack_effect_tuple[0]
         if "accuracy" == action:
-            die_index, token_index = effect_tuple[1], effect_tuple[2]
-            # Mark this die as spent, they will be removed from the pool after we handle operations
-            # that require the indexes to stay the same
-            spent_dice.append(die_index)
-            # An token targeted with an accuracy cannot be spent normally
-            acc_tokens.append(token_index)
-            token_type = get_token_type(token_index, defender[0])
-    # Remove the spent dice
-    for index in sorted(spent_dice, reverse=True):
-        del pool_faces[index]
-        del pool_colors[index]
-
+            spent_dice = []
+            for acc_action in attack_effect_tuple[1]:
+                die_index, token_index = acc_action[0], acc_action[1]
+                # Mark this die as spent, it will be removed from the pool after we handle operations
+                # that require the indexes to stay the same
+                spent_dice.append(die_index)
+                # A token targeted with an accuracy cannot be spent normally
+                acc_tokens.append(token_index)
+            # Remove the spent dice
+            for index in sorted(spent_dice, reverse=True):
+                del pool_faces[index]
+                del pool_colors[index]
+        # TODO Handle more effects at some point
+        # Get the next attack effect
+        # TODO Update the world state for the removed dice and accuracied tokens
+        # TODO Are all of these things references? Not 100% clear if this needs to be called again,
+        # but it may also trigger some logging. The design here should be more clear, and maybe the
+        # world state should be modified through an interface instead of through modifying internal
+        # variables.
+        attack = AttackState(attack_range, attacker[0], attacker[1], defender[0], defender[1], pool_colors, pool_faces)
+        world_state.updateAttack(attack)
+        # Log if the log is present
+        if state_log is not None:
+            state_log.append(('state', world_state.clone()))
+        attack_effect_tuple = offensive_agent.handle(world_state)
+        # Log if the log is present
+        if state_log is not None:
+            state_log.append(('action', attack_effect_tuple))
+        # TODO FIXME The action and world state should be encoded and logged
 
     world_state.setSubPhase("spend defense tokens")
-    token, token_targets = defensive_agent.handle(world_state)
-    while None != token and token < len(defender[0].defense_tokens):
-        # Spend the token and resolve the effect
-        token_type = world_state.attack.defender_spend_token(token)
-        # TODO If a token has already been spent it cannot be spent again, we should enforce that here.
-        if "redirect" == token_type:
-            redirect_hull, redirect_amount = token_targets
-        elif "evade" == token_type:
-            # Need to evade a specific die
-            die_index = token_targets
-            if die_index >= len(pool_colors):
-                print("Warning: could not find specified evade token target.")
-            else:
-                if 'long' == attack_range:
-                    # Remove the die
-                    pool_colors = pool_colors[:die_index] + pool_colors[die_index+1:]
-                    pool_faces = pool_faces[:die_index] + pool_faces[die_index+1:]
-                elif 'medium' == attack_range:
-                    # Reroll the die
-                    pool_faces[die_index] = ArmadaDice.random_roll(pool_colors[die_index])
-                world_state.attack.pool_colors = pool_colors
-                world_state.attack.pool_faces = pool_faces
-        # See if the agent will spend another defense token
-        token, token_targets = defensive_agent.handle(world_state)
+    # Log if the log is present
+    if state_log is not None:
+        state_log.append(('state', world_state.clone()))
+
+    # The defense agent returns: ("effect name", (args...))
+    # For a standard defense token the first argument is the token index.
+    effect, effect_args = defensive_agent.handle(world_state)
+    # Log if the log is present
+    if state_log is not None:
+        state_log.append(('action', (effect, effect_args)))
+    while None != effect:
+        # TODO Only handling basic token effects for now
+        if effect in ArmadaTypes.defense_tokens:
+            token = effect_args[0]
+            if token < len(defender[0].defense_tokens):
+                # Spend the token and resolve the effect
+                token_type = world_state.attack.defender.token_type(token)
+                # If a token has already been spent it cannot be spent again, we should enforce that here.
+                if attack.token_type_spent(token_type):
+                    raise RuntimeError("Cannot spend the same token twice during the spend defense tokens sub phase!")
+                world_state.attack.defender_spend_token(token)
+                # Only redirect and evade have additional targets
+                if "redirect" == token_type:
+                    redirects = effect_args[1:]
+                elif "evade" == token_type:
+                    # Need to evade a specific die (or multiple if allowed by distance or by card effect)
+                    for die_index in effect_args[1:]:
+                        if die_index >= len(pool_colors):
+                            print("Warning: could not find specified evade token target.")
+                        else:
+                            if 'long' == attack_range or 'extreme' == attack_range:
+                                # Remove the die
+                                pool_colors = pool_colors[:die_index] + pool_colors[die_index+1:]
+                                pool_faces = pool_faces[:die_index] + pool_faces[die_index+1:]
+                            elif 'medium' == attack_range:
+                                # Reroll the die
+                                pool_faces[die_index] = ArmadaDice.random_roll(pool_colors[die_index])
+                            world_state.attack.pool_colors = pool_colors
+                            world_state.attack.pool_faces = pool_faces
+        else:
+            raise RuntimeError("Effect {} is currently not handled.".format(effect))
+        # Log if the log is present
+        if state_log is not None:
+            state_log.append(('state', world_state.clone()))
+        # See if the agent will trigger another effect.
+        effect, effect_args = defensive_agent.handle(world_state)
+        # Log if the log is present
+        if state_log is not None:
+            state_log.append(('action', (effect, effect_args)))
 
     # TODO The defender may have ways of modifying the attack pool at this point
 
@@ -116,22 +172,34 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
     if spent_types[ArmadaTypes.defense_tokens.index('brace')]:
         damage = damage // 2 + damage % 2
 
+    hull_damage = 0
     if spent_types[ArmadaTypes.defense_tokens.index('redirect')]:
-        # Redirect to the target hull zone, but don't redirect more damage than is present
-        redirect_amount = min(damage, redirect_amount)
-        defender[0].damage(redirect_hull, redirect_amount)
-        # TODO Need to remember if damage was directed to the hull
-        # Reduce the damage left
-        damage = damage - redirect_amount
+        # Redirect to the target hull zone(s), but don't redirect more damage than is present
+        for redirect_hull, redirect_amount in redirects:
+            redirect_amount = min(damage, redirect_amount)
+            # Remember if damage will be directed to the hull to see if the standard or XX9
+            # critical should be triggered.
+            # This would be a weird thing to do, but technically you could redirect damage to the
+            # hull if you want shields on the defending hull zone for some reason (or because you
+            # are a random agent or dumb network doing something dumb).
+            hull_damage += defender[0].shield_damage(redirect_hull, redirect_amount)
+            # Reduce the damage left
+            damage = damage - redirect_amount
+
+    world_state.setSubPhase("resolve damage")
+
+    # Deal remaining damage to the shield in the defending hull zone
+    hull_damage += defender[0].shield_damage(defender[1], damage)
+    # TODO FIXME HERE Logging
+    #world_state.attack['{} damage'.format(defender[1])] = damage
 
     # TODO FIXME Handle criticals and the contain token
+    # Deal hull damage
+    defender[0].damage('hull', hull_damage)
 
-    # Deal remaining damage to the defender
-    # TODO FIXME HERE
-    #world_state.attack['{} damage'.format(defender[1])] = damage
-    defender[0].damage(defender[1], damage)
-
-    # TODO The actual actions taken should be logged with the world_state
+    # Log the final attack state if the log is present
+    if state_log is not None:
+        state_log.append(('state', world_state.clone()))
     # TODO Log the world state into a game log
     logging.info(world_state)
 

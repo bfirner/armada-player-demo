@@ -1,5 +1,5 @@
 #
-# Copyright Bernhard Firner, 2019
+# Copyright Bernhard Firner, 2019-2020
 #
 # Learning model that predicts actions based upon a one-hot encoding of the current world state.
 # 

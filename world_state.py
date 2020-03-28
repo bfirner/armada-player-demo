@@ -9,6 +9,8 @@
 
 from game_constants import (ArmadaPhases, ArmadaTypes)
 
+import copy
+
 class AttackState:
     """The state of a single attack."""
 
@@ -124,3 +126,7 @@ class WorldState:
 
     def updateAttack(self, attack_state):
         self.attack = attack_state
+
+    def clone(self):
+        """Return a clone of the object using new memory."""
+        return copy.deepcopy(self)

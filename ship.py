@@ -4,7 +4,8 @@ from enum import Enum
 
 from dice import ArmadaDice
 from game_constants import (
-    ArmadaDimensions
+    ArmadaDimensions,
+    ArmadaTypes
 )
 
 class UpgradeType(Enum):
@@ -60,6 +61,20 @@ class Ship:
         self.width, self.height = ArmadaDimensions.ship_bases[template['Size'].lower()]
         self.reset()
 
+    def token_type(self, index):
+        """Get the string name of the token type in the given index.
+
+        Arguments:
+            index (int): Index to check
+        Returns:
+            str: Name of the token type.
+        """
+        name = self.defense_tokens[index]
+        if 'red' == name[:len('red')]:
+            return name[len('red '):]
+        else:
+            return name[len('green '):]
+
     def ready_defense_tokens(self):
         """Replace all red tokens with green versions."""
         for token in self.defense_tokens:
@@ -70,6 +85,17 @@ class Ship:
         """Unexhaust upgrade cards."""
         # Not implemented yet
         pass
+
+    def adjacent_zones(self, zone):
+        """Return hull zones adjacent to the given zone."""
+        if self.attributes['size'] == 'Huge':
+            if zone not in ArmadaTypes.adjacent_huge_hull_zones:
+                raise RuntimeError("Unrecognized hull zone {}".format(zone))
+            return ArmadaTypes.adjacent_huge_hull_zones[zone]
+        else:
+            if zone not in ArmadaTypes.adjacent_hull_zones:
+                raise RuntimeError("Unrecognized hull zone {}".format(zone))
+            return ArmadaTypes.adjacent_hull_zones[zone]
 
     def reset(self):
         """Resets shields, hull, and defense tokens."""
@@ -82,13 +108,17 @@ class Ship:
         self.shields["right"] = int(self.attributes["shields right"])
         self.shields["front"] = int(self.attributes["shields front"])
         self.shields["rear"] = int(self.attributes["shields rear"])
+        if self.attributes['size'] == 'Huge':
+            self.shields["left-auxiliary"] = int(self.attributes["shields left auxiliary"])
+            self.shields["right-auxiliary"] = int(self.attributes["shields right auxiliary"])
         self.defense_tokens = []
         offset = len("defense token ")
-        for token in ["defense token redirect", "defense token brace", "defense token evade",
-                      "defense token contain", "defense token scatter"]:
+        for token in ArmadaTypes.defense_tokens:
+            str_token = "defense token " + token
             # Insert a green token for each available token
-            for _ in range(self.attributes[token]):
-                self.defense_tokens.append("green " + token[offset:].lower())
+            if str_token in self.attributes:
+                for _ in range(self.attributes[str_token]):
+                    self.defense_tokens.append("green " + token)
         # Tokens spent in a spend defense tokens phase
         self.spent_tokens =  [False] * len(self.defense_tokens)
 
@@ -123,18 +153,37 @@ class Ship:
                 colors.append("black")
                 faces.append(ArmadaDice.random_roll("black"))
         return colors, faces
-        
+
+    def shield_damage(self, zone, amount):
+        """
+        Deal damage to a hull zone but only deplete the shields, don't assign hull damage. Return
+        the amount of damage that will be assigned to the hull.
+
+        Args:
+            zone (str): One of ArmadaTypes.hull_zones
+            amount (int): Amount of damage
+        Returns:
+            (int): Amount of damage that will be assigned to the hull.
+        """
+        if self.shields[zone] >= amount:
+            self.shields[zone] -= amount
+            return 0
+        else:
+            amount -= self.shields[zone]
+            self.shields[zone] = 0
+            return amount
 
     def damage(self, zone, amount):
         """
         Deal damage to a hull zone.
 
         Args:
-            zone (str): One of front, left, right, and rear
+            zone (str): One of ArmadaTypes.hull_zones or "hull"
             amount (int): Amount of damage
         """
-        # TODO Defense tokens
-        if self.shields[zone] >= amount:
+        if "hull" == zone:
+            self._hull -= amount
+        elif self.shields[zone] >= amount:
             self.shields[zone] -= amount
         else:
             amount -= self.shields[zone]

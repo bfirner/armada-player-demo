@@ -96,20 +96,23 @@ ship_names = [name for name in ship_templates.keys()]
 # The plan:
 # Choose a random scenario (range, ships)
 # Loop:
-#   Choose actions based upon policy network + some randomness
-#   Record the scenario into a pool
-# Backprop on a random subset of the (state, action, reward, new state) tuples
-# The goal is to train a network such that if it is given a state it predicts an action that
-# maximizes the reword (in this case the lifetime of the defending ship). To train we take the
-# network to produce an action based upon the current state
+#   1. Choose actions based upon policy network or a random action
+#   2. Record the action and eventual reward (the lifetime) into a pool
+#   3. Sample from the pool to train a prediction model. The prediction model should train for the
+#   best possible result, or should predict a distribution. Can also train a policy net. 
+#   4. (optional) Use the prediction network to train the policy model by following actions from
+#      the policy model and recording the result. The reward is the comparison of the prediction
+#      network to the actual outcome so the model will be trained to either outperform the
+#      prediction or get close to it. This is an alternative to training the policy network
+#      directly.
 #
-# Step 1:
-# Just train a lifetime predictor. There is a lot of randomness in dice rolls of course, so our goal
-# will be to train a density model. This means that we will train the network to estimate the
-# parameters of the distribution that describes the lifetime. In plainer words, we will train the
-# network to predict the average lifetime of the vessel and the undertainty of that prediction.
-# We are rolling three kinds of dice, so in reality this is the combination of three probability
-# distributions, but to simplify things we will estimate it as a single normal.
+# _The Predictor_
+# There is a lot of randomness in dice rolls, so our goal will be to train a density model. This
+# means that we will train the network to estimate the parameters of the distribution that describes
+# the lifetime. In plainer words, we will train the network to predict the average lifetime of the
+# vessel and the undertainty of that prediction.  We are rolling three kinds of dice, so in reality
+# this is the combination of three probability distributions, but to simplify things we will
+# estimate it as a single normal.
 # The loss will be the negative log of the probability of an outcome given a predicted mean and
 # standard deviation. This works because as the probability approaches zero the negative log of it
 # approaches infinity. So if the outputs the mean and sigma the loss will be:
@@ -117,6 +120,8 @@ ship_names = [name for name in ship_templates.keys()]
 # > loss = -d.log_prob(result)
 
 # Create a learning agent. This will initialize the model.
+# TODO The learning agent should be the one to take random actions if it is not
+# using novelty for exploration.
 prediction_agent = LearningAgent(ArmadaModel(with_novelty=args.novelty))
 
 # Load a previously trained model for additional training

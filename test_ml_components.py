@@ -94,29 +94,29 @@ def test_token_encodings():
     # Order of tokens in the encoding
     # token_types = ["evade", "brace", "scatter", "contain", "redirect"]
     # Check the green token section
-    ttensor = torch.tensor([0.0, 0, 0, 0, 0])
+    ttensor = torch.zeros(len(ArmadaTypes.defense_tokens))
     ttensor[ArmadaTypes.defense_tokens.index("brace")] = 1.0
-    assert torch.equal(get_tokens(enc_one_brace, "green", Encodings.hot_token_size), ttensor)
+    assert torch.allclose(get_tokens(enc_one_brace, "green", Encodings.hot_token_size), ttensor)
 
-    ttensor = torch.tensor([0.0, 0, 0, 0, 0])
+    ttensor = torch.zeros(len(ArmadaTypes.defense_tokens))
     ttensor[ArmadaTypes.defense_tokens.index("brace")] = 2.0
-    assert torch.equal(get_tokens(enc_two_brace, "green", Encodings.hot_token_size), ttensor)
+    assert torch.allclose(get_tokens(enc_two_brace, "green", Encodings.hot_token_size), ttensor)
 
-    ttensor = torch.tensor([0.0, 0, 0, 0, 0])
+    ttensor = torch.zeros(len(ArmadaTypes.defense_tokens))
     ttensor[ArmadaTypes.defense_tokens.index("redirect")] = 2.0
-    assert torch.equal(get_tokens(enc_two_redirect, "green", Encodings.hot_token_size), ttensor)
+    assert torch.allclose(get_tokens(enc_two_redirect, "green", Encodings.hot_token_size), ttensor)
 
-    ttensor = torch.tensor([0.0, 0, 0, 0, 0])
+    ttensor = torch.zeros(len(ArmadaTypes.defense_tokens))
     ttensor[ArmadaTypes.defense_tokens.index("evade")] = 2.0
-    assert torch.equal(get_tokens(enc_two_evade, "green", Encodings.hot_token_size), ttensor)
+    assert torch.allclose(get_tokens(enc_two_evade, "green", Encodings.hot_token_size), ttensor)
 
-    ttensor = torch.tensor([0.0, 0, 0, 0, 0])
+    ttensor = torch.zeros(len(ArmadaTypes.defense_tokens))
     ttensor[ArmadaTypes.defense_tokens.index("contain")] = 2.0
-    assert torch.equal(get_tokens(enc_two_contain, "green", Encodings.hot_token_size), ttensor)
+    assert torch.allclose(get_tokens(enc_two_contain, "green", Encodings.hot_token_size), ttensor)
 
-    ttensor = torch.tensor([0.0, 0, 0, 0, 0])
+    ttensor = torch.zeros(len(ArmadaTypes.defense_tokens))
     ttensor[ArmadaTypes.defense_tokens.index("scatter")] = 2.0
-    assert torch.equal(get_tokens(enc_two_scatter, "green", Encodings.hot_token_size), ttensor)
+    assert torch.allclose(get_tokens(enc_two_scatter, "green", Encodings.hot_token_size), ttensor)
 
 
 def test_red_token_encodings():
@@ -148,28 +148,26 @@ def test_red_token_encodings():
     enc_two_contain = make_encoding(attacker, two_contain, "short", agent)[0][0]
     enc_two_scatter = make_encoding(attacker, two_scatter, "short", agent)[0][0]
     
-    # Order of tokens in the encoding
-    # token_types = ["evade", "brace", "scatter", "contain", "redirect"]
     # Check the red token section
-    ttensor = torch.tensor([0.0, 0, 0, 0, 0])
+    ttensor = torch.zeros(len(ArmadaTypes.defense_tokens))
     ttensor[ArmadaTypes.defense_tokens.index("brace")] = 2.0
-    assert torch.equal(get_tokens(enc_two_brace, "red", Encodings.hot_token_size), ttensor)
+    assert torch.allclose(get_tokens(enc_two_brace, "red", Encodings.hot_token_size), ttensor)
 
-    ttensor = torch.tensor([0.0, 0, 0, 0, 0])
+    ttensor = torch.zeros(len(ArmadaTypes.defense_tokens))
     ttensor[ArmadaTypes.defense_tokens.index("redirect")] = 2.0
-    assert torch.equal(get_tokens(enc_two_redirect, "red", Encodings.hot_token_size), ttensor)
+    assert torch.allclose(get_tokens(enc_two_redirect, "red", Encodings.hot_token_size), ttensor)
 
-    ttensor = torch.tensor([0.0, 0, 0, 0, 0])
+    ttensor = torch.zeros(len(ArmadaTypes.defense_tokens))
     ttensor[ArmadaTypes.defense_tokens.index("evade")] = 2.0
-    assert torch.equal(get_tokens(enc_two_evade, "red", Encodings.hot_token_size), ttensor)
+    assert torch.allclose(get_tokens(enc_two_evade, "red", Encodings.hot_token_size), ttensor)
 
-    ttensor = torch.tensor([0.0, 0, 0, 0, 0])
+    ttensor = torch.zeros(len(ArmadaTypes.defense_tokens))
     ttensor[ArmadaTypes.defense_tokens.index("contain")] = 2.0
-    assert torch.equal(get_tokens(enc_two_contain, "red", Encodings.hot_token_size), ttensor)
+    assert torch.allclose(get_tokens(enc_two_contain, "red", Encodings.hot_token_size), ttensor)
 
-    ttensor = torch.tensor([0.0, 0, 0, 0, 0])
+    ttensor = torch.zeros(len(ArmadaTypes.defense_tokens))
     ttensor[ArmadaTypes.defense_tokens.index("scatter")] = 2.0
-    assert torch.equal(get_tokens(enc_two_scatter, "red", Encodings.hot_token_size), ttensor)
+    assert torch.allclose(get_tokens(enc_two_scatter, "red", Encodings.hot_token_size), ttensor)
 
 
 def test_spent_encodings():
@@ -187,7 +185,7 @@ def test_spent_encodings():
     spent_begin = 1 + len(ArmadaTypes.hull_zones)
     spent_end = spent_begin + ArmadaTypes.max_defense_tokens * Encodings.hot_token_size
     spent_mask = [0] * (len(ArmadaTypes.defense_tokens) + len(ArmadaTypes.token_colors)) + [1]
-    spent_mask = torch.Tensor(spent_mask * ArmadaTypes.max_defense_tokens).byte()
+    spent_mask = torch.Tensor(spent_mask * ArmadaTypes.max_defense_tokens).bool()
 
     # Verify that no tokens are marked spent by default
     assert torch.sum(encoding[spent_begin:spent_end].masked_select(spent_mask)) == 0

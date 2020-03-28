@@ -125,6 +125,8 @@ class Encodings():
     def unmapSection(section, slice_size, slots):
         """Unmap a section of the encoding in place.
 
+        This is used to unshuffle the data that was shuffled to remove positional bias in training.
+
         Args:
             section (torch.Tensor): A section of an encoding
             slice_size       (int): The number of elements in each slice of the section.
@@ -145,6 +147,9 @@ class Encodings():
 
     def inPlaceUnmap(encoding, token_slots, die_slots):
         """Unmap the random slot arrangement done for training.
+
+        This should be used for human consumption since the shuffling is only required to remove
+        positional bias before creating training data for a network.
 
         Args:
             encoding (torch.Tensor): The encoding
@@ -243,6 +248,8 @@ class Encodings():
             world state size (int)
         """
 
+        # TODO FIXME This should probably accept an argument specifying the phase whose size should
+        # be returned.
         # Start from 0 and build ourselves up
         world_state_size = 0
 
@@ -253,4 +260,107 @@ class Encodings():
         # Ship encodings
 
         return Encodings.calculateAttackSize() + world_state_size
+
+    def calculateActionSize(subphase):
+        """Calculate the encoding of an action in the given subphase.
+
+        Arguments:
+            subphase (str) : A string from the subphases in game_constants.py
+
+        Returns:
+            int : The encoding size. This is the size of a tensor to encode this action.
+        """
+
+        if "attack - resolve attack effects" == subphase:
+            # Manipulate dice in the dice pool. Every ability or action that can occur needs to have
+            # an encoding here.
+            # TODO For now just handle spending accuracy icons. 
+            # Each die could be an accuracy and could target any of the defender's tokens.
+            return ArmadaTypes.max_defense_tokens * Encodings.max_die_slots
+            
+        elif "attack - spend defense tokens" == subphase:
+            # The defender spends tokens to modify damage or the dice pool. There are also other
+            # abilities that can be used at this time, such as Admonition.
+            # There are currently six token types. Some require additional targets.
+            # No additional target required: "brace", "scatter", "contain", and "salvo"
+            # The "evade" targets one (or more) of the attackers dice.
+            # The "redirect" token targets one (or more with certain upgrades) hull zones.
+            # TODO Just covering tokens for now.
+            return 4 + Encodings.max_die_slots + len(ArmadaTypes.hull_zones)
+        else:
+            raise NotImplementedError(
+                "Encoding for attack phase {} not implemented.".format(subphase))
+
+    def encodeAction(subphase, action_tuple):
+        """Calculate the encoding of an action in the given subphase.
+
+        Arguments:
+            subphase (str)          : A string from the subphases in game_constants.py
+            action_tuple (str, ...) : A tuple of strings and numbers describing the action.
+
+        Returns:
+            (torch.Tensor)      : Encoding of the action described by action_tuple.
+        """
+
+        encoding = torch.zeros(Encodings.calculateActionSize(subphase))
+
+
+        if "attack - resolve attack effects" == subphase:
+            # Manipulate dice in the dice pool. Every ability or action that can occur needs to have
+            # an encoding here.
+            # TODO For now just handle spending accuracy icons. 
+            # Each die could be an accuracy and could target any of the defender's tokens.
+            action = action_tuple[0]
+            if "accuracy" == action:
+                die_index, token_index = action_tuple[1], action_tuple[2]
+                # Mark the token and spent die
+                encoding[token_index] = 1.
+                encoding[ArmadaTypes.max_defense_tokens + die_index] = 1.
+            else:
+                raise NotImplementedError(
+                    "Action {} unimplemented for attack phase {}.".format(action, subphase))
+        elif "attack - spend defense tokens" == subphase:
+            # The defender spends tokens to modify damage or the dice pool. There are also other
+            # abilities that can be used at this time, such as Admonition.
+            # There are currently six token types. Some require additional targets.
+            # No additional target required: "brace", "scatter", "contain", and "salvo"
+            # The "evade" targets one (or more) of the attackers dice.
+            # The "redirect" token targets one (or more with certain upgrades) hull zones.
+            # TODO Just covering tokens for now.
+
+            # Offsets used during encodings
+            evade_offset = len(ArmadaTypes.defense_tokens) + ArmadaTypes.max_defense_tokens
+            redirect_offset = evade_offset + Encodings.max_die_slots
+
+            action = action_tuple[0]
+            # Verify that we can handle this action
+            if action not in ArmadaTypes.defense_tokens:
+                raise NotImplementedError(
+                    "{} unimplemented for attack phase {}.".format(action, subphase))
+
+            # Handle the tokens that do not require targets
+            for ttype in ["brace", "scatter", "contain", "salvo"]:
+                if ttype == action:
+                    token_index = action_tuple[1]
+                    encoding[ArmadaTypes.defense_tokens.index(ttype)] = 1.
+                    encoding[len(ArmadaTypes.defense_tokens) + token_index] = 1.
+            # Handle the tokens with targets
+            if "evade" == action:
+                token_index = action_tuple[1]
+                encoding[ArmadaTypes.defense_tokens.index(evade)] = 1.
+                encoding[len(ArmadaTypes.defense_tokens) + token_index] = 1.
+                targets = action_tuple[2]
+                for target in targets:
+                    encoding[evade_offset + target] = 1.
+            elif "redirect" == action:
+                token_index = action_tuple[1]
+                encoding[ArmadaTypes.defense_tokens.index(evade)] = 1.
+                encoding[len(ArmadaTypes.defense_tokens) + token_index] = 1.
+                targets = action_tuple[2]
+                for target, amount in targets:
+                    encoding[redirect_offset + ArmadaTypes.hull_zones.index(target)] = amount
+        else:
+            raise NotImplementedError(
+                "Encoding for attack phase {} not implemented.".format(subphase))
+
 

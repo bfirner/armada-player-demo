@@ -1,5 +1,5 @@
 #
-# Copyright Bernhard Firner, 2019
+# Copyright Bernhard Firner, 2019-2020
 #
 import random
 
@@ -68,10 +68,10 @@ class LearningAgent(BaseAgent):
 
         if None == self.model:
             # Return no action
-            return []
+            return None
         # Encode the state, forward through the network, decode the result, and return the result.
         # TODO
-        return []
+        return None
 
     # This agent deals with the "spend defense tokens" step.
     def spendDefenseTokens(self, world_state):
@@ -97,7 +97,13 @@ class LearningAgent(BaseAgent):
         as_enc, token_slots, die_slots = Encodings.encodeAttackState(world_state)
         as_enc = as_enc.to(self.device)
         if not self.model.with_novelty:
-            action = self.model.forward("def_tokens", as_enc)[0]
+            # Forward through the policy net randomly, otherwise return random actions
+            if self.randprob >= random.random():
+                # Take a random action
+                # TODO FIXME Here
+                action = self.random_agent("def_tokens", as_enc)[0]
+            else:
+                action = self.model.forward("def_tokens", as_enc)[0]
             # Remember this state action pair if in memory mode
             if self.remembering:
                 self.memory.append((world_state.attack, as_enc, action))

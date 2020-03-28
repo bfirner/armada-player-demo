@@ -1,6 +1,5 @@
-
 #
-# Copyright Bernhard Firner, 2019
+# Copyright Bernhard Firner, 2019-2020
 #
 import ship
 from dice import ArmadaDice
@@ -12,7 +11,7 @@ from utility import (token_index, greenest_token_index, greenest_token, max_dama
 class SimpleAgent(BaseAgent):
 
     def __init__(self):
-        """Initialize the simple agent with a cuople of simple state handlers."""
+        """Initialize the simple agent with a couple of simple state handlers."""
         handler = {
                 "attack - resolve attack effects": self.resolveAttackEffects,
                 "attack - spend defense tokens": self.spendDefenseTokens
@@ -48,12 +47,12 @@ class SimpleAgent(BaseAgent):
         # First, no damage means don't do anything
         damage = ArmadaDice.pool_damage(pool_faces)
         if 0 == damage:
-            return []
+            return None
 
         # Since we are only dealing with spending accuracies at this time return here if there are none.
         accuracies = face_index("accuracy", pool_faces)
         if 0 == len(accuracies):
-            return []
+            return None
         # Keep track of which accuracy we will spend next
         acc_index = 0
 
@@ -84,11 +83,11 @@ class SimpleAgent(BaseAgent):
         if scatters:
             for idx in scatters:
                 if acc_index < len(accuracies):
-                    targets.append(("accuracy", accuracies[acc_index], idx))
+                    targets.append((accuracies[acc_index], idx))
                     acc_index += 1
         # Exit if there is nothing else to spend
         if len(accuracies) == acc_index:
-            return targets
+            return ("accuracy", targets)
 
         # 1) If this is at short range then only worry about braces (not worrying about effects like
         # Mon-Mothma for the simple agent)
@@ -97,31 +96,34 @@ class SimpleAgent(BaseAgent):
         if 'short' == attack.range:
             for idx in braces:
                 if acc_index < len(accuracies):
-                    targets.append(("accuracy", accuracies[acc_index], idx))
+                    targets.append((accuracies[acc_index], idx))
                     acc_index += 1
         elif ((braces and not evades) or
               (len(accuracies) - acc_index >= (len(braces) + len(evades))) or
               brace_damage < evade_damage):
             for idx in braces:
                 if acc_index < len(accuracies):
-                    targets.append(("accuracy", accuracies[acc_index], idx))
+                    targets.append((accuracies[acc_index], idx))
                     acc_index += 1
             for idx in evades:
                 if acc_index < len(accuracies):
-                    targets.append(("accuracy", accuracies[acc_index], idx))
+                    targets.append((accuracies[acc_index], idx))
                     acc_index += 1
         else:
             for idx in evades:
                 if acc_index < len(accuracies):
-                    targets.append(("accuracy", accuracies[acc_index], idx))
+                    targets.append((accuracies[acc_index], idx))
                     acc_index += 1
             for idx in braces:
                 if acc_index < len(accuracies):
-                    targets.append(("accuracy", accuracies[acc_index], idx))
+                    targets.append((accuracies[acc_index], idx))
                     acc_index += 1
 
         # Return targets
-        return targets
+        if 0 < len(targets):
+            return ("accuracy", targets)
+        else:
+            return None
 
     # This agent deals with the "spend defense tokens" step.
     def spendDefenseTokens(self, world_state):
@@ -151,7 +153,7 @@ class SimpleAgent(BaseAgent):
 
         # First, no damage means don't do anything
         if 0 == ArmadaDice.pool_damage(pool_faces):
-            return None, None
+            return (None, None)
 
         # No need to spend any more tokens if we have already scattered
         if attack.token_type_spent('scatter'):
@@ -162,7 +164,7 @@ class SimpleAgent(BaseAgent):
         # this is just a basic agent so this is okay.
         scatter = greenest_token("scatter", defender, accuracy_tokens)
         if None != scatter:
-            return (scatter, None)
+            return ('scatter', (scatter, None))
 
         evade = greenest_token("evade", defender, accuracy_tokens)
         if not attack.token_type_spent('evade') and None != evade:
@@ -172,13 +174,13 @@ class SimpleAgent(BaseAgent):
             # number. However, it may still be useful in that case to remove a critical
             # face. We will leave handling things like that to a smarter system.
             if 'short' != attack.range:
-                return (evade, max_damage_index(pool_faces))
+                return ('evade', (evade, max_damage_index(pool_faces)))
                 # If we made it here then there were no dice worth cancelling or rerolling.
 
         # Brace if damage > 1
         brace = greenest_token("brace", defender, accuracy_tokens)
         if not attack.token_type_spent('brace') and None != brace and 1 < ArmadaDice.pool_damage(pool_faces):
-            return (brace, None)
+            return ('brace', (brace, None))
 
         # Redirect to preserve shields
         # Should really check adjacent shields and figure out what to redirect, but we will leave that
