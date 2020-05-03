@@ -8,7 +8,6 @@ import torch
 
 import ship
 import utility
-from game_constants import (ArmadaTypes)
 from game_engine import handleAttack
 from random_agent import (RandomAgent)
 from world_state import (WorldState)
@@ -19,13 +18,15 @@ keys, ship_templates = utility.parseShips('data/test_ships.csv')
 # Test the defense tokens by comparing the results of the test ships with and without those tokens
 
 def a_vs_b(ship_a, ship_b, trials, attack_range):
-    """This function calculates the average time to destruction when a shoots at b.
+    """This uses a random agent to choose actions during attacks from ship_a to ship_b.
 
     Args:
       ship_a ((Ship, str)): Attacker and hull zone tuple.
       ship_b ((Ship, str)): Defender and hull zone tuple.
       trials (int): Number of trials in average calculation.
       range (str): Attack range.
+    Returns:
+      state_log (List[List[("state" or "action", (WorldState or action tuple))]])
     
     """
     agent = RandomAgent()
@@ -52,30 +53,37 @@ def a_vs_b(ship_a, ship_b, trials, attack_range):
 
 
 def test_random_agent():
-    """Test that brace increases the number of attacks required to destroy a ship."""
-
+    """Test all possible defense tokens are used and accuracy target everything."""
     attacker = ship.Ship(name="Attacker", template=ship_templates["Attacker"], upgrades=[], player_number=1)
 
     ship_a = ship.Ship(name="Ship A", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=1)
     ship_b = ship.Ship(name="Ship B", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
 
-    # Test with 1000 trials to compensate for the natural variability in rolls
+    # Verify that all of the defense tokens are being used and accuracied.
+    use_counts = torch.zeros(len(ship_b.defense_tokens))
+    accuracy_targets = torch.zeros(len(ship_b.defense_tokens))
+
+    # Test with 10 trials at each range to compensate for the natural variability in rolls
     attacks = []
     for attack_range in ['long', 'medium', 'short']:
         attacks = attacks + a_vs_b(ship_a, ship_b, 10, attack_range)
-
-    # Verify that all of the defense tokens are being used.
-    use_counts = torch.zeros(len(ship_b.defense_tokens))
     # Loop through all attacks and increment the used tokens
-    print("There are {} attacks.".format(len(attacks)))
     for attack in attacks:
-        if 'state' == attack[0] and attack[1].sub_phase == "resolve damage":
-            # Check the spent tokens
-            use_counts += torch.Tensor(attack[1].attack.defender.spent_tokens)
-    # TODO FIXME HERE Evade isn't being used
-    print("use counts are {}".format(use_counts))
-    print("tokens are {}".format(ship_b.defense_tokens))
+        if 'state' == attack[0] and attack[1].sub_phase == "attack - resolve damage":
+            # Check the spent token types
+            use_counts += torch.Tensor(attack[1].attack.spent_types)
 
     # We aren't handling the salvo token yet, but check that the others are being spent.
     for tidx, token in enumerate(ship_b.defense_tokens):
         assert 0 < use_counts[tidx]
+
+    # Check accuracy usage
+    for attack in attacks:
+        if 'state' == attack[0] and attack[1].sub_phase == "attack - spend defense tokens":
+            # Check the spent tokens from the previous resolve attack effects phase
+            tokens_left = len(attack[1].attack.accuracy_tokens)
+            accuracy_targets[:tokens_left] += torch.Tensor(attack[1].attack.accuracy_tokens)
+
+    # Check that accuracies are used against any of the tokens.
+    for tidx, token in enumerate(ship_b.defense_tokens):
+        assert 0 < accuracy_targets[tidx]

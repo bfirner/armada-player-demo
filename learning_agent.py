@@ -22,8 +22,8 @@ class LearningAgent(BaseAgent):
             model (torch.nn.Module or None): If None this agent will pass for all supported states
         """
         handler = {
-                "attack - resolve attack effects": self.resolveAttackEffects,
-                "attack - spend defense tokens": self.spendDefenseTokens
+                "ship phase - attack - resolve attack effects": self.resolveAttackEffects,
+                "ship phase - attack - spend defense tokens": self.spendDefenseTokens
         }
         super(LearningAgent, self).__init__(handler)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -64,7 +64,7 @@ class LearningAgent(BaseAgent):
                                 ("add", colors), ("reroll", indices), or ("remove", indices)
         """
         # We only handle one sub-phase in this function
-        assert world_state.full_phase == "attack - resolve attack effects"
+        assert world_state.sub_phase == "attack - resolve attack effects"
 
         if None == self.model:
             # Return no action
@@ -88,7 +88,7 @@ class LearningAgent(BaseAgent):
                             target hull zone and the amount of damage to direct to that hull zone.
         """
         # We only handle one sub-phase in this function
-        assert world_state.full_phase == "attack - spend defense tokens"
+        assert world_state.sub_phase == "attack - spend defense tokens"
 
         if None == self.model:
             # Return no action

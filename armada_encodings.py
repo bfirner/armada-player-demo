@@ -57,8 +57,8 @@ class Encodings():
 
         # Shields and hull
         for offset, zone in enumerate(hull_zones):
-            encoding[0, cur_offset + offset] = ship.shields[zone]
-        encoding[0, cur_offset + len(hull_zones)] = ship.hull()
+            encoding[cur_offset + offset] = ship.shields[zone]
+        encoding[cur_offset + len(hull_zones)] = ship.hull()
         cur_offset += len(hull_zones) + 1
 
         # Defense tokens
@@ -73,14 +73,14 @@ class Encodings():
                 token = ship.defense_tokens[token_idx]
                 # Encode the token type
                 for offset, ttype in enumerate(ArmadaTypes.defense_tokens):
-                    encoding[0, slot_offset + offset] = 1 if ttype in token else 0
+                    encoding[slot_offset + offset] = 1 if ttype in token else 0
                 slot_offset = slot_offset + len(ArmadaTypes.defense_tokens)
                 # Encode the token color
                 for offset, color in enumerate(ArmadaTypes.token_colors):
-                    encoding[0, slot_offset + offset] = 1 if color == token[0:len(color)] else 0
+                    encoding[slot_offset + offset] = 1 if color == token[0:len(color)] else 0
                 slot_offset = slot_offset + len(ArmadaTypes.token_colors)
                 # Encode if this particular token has been spent
-                encoding[0, slot_offset] = 1 if ship.spent_tokens[token_idx] else 0
+                encoding[slot_offset] = 1 if ship.spent_tokens[token_idx] else 0
 
         # Move the current encoding offset to the position after the token section
         cur_offset += Encodings.hot_token_size * ArmadaTypes.max_defense_tokens
@@ -161,17 +161,17 @@ class Encodings():
         # Unshuffle the tokens
         token_begin = Encodings.getAttackTokenOffset()
         token_end = token_begin + ArmadaTypes.max_defense_tokens
-        Encodings.unmapSection(encoding[0, token_begin:token_end], 1, token_slots)
+        Encodings.unmapSection(encoding[token_begin:token_end], 1, token_slots)
 
         # Unshuffle the ship tokens
         def_tokens_begin = len(ArmadaTypes.hull_zones) + 1
         def_tokens_end = def_tokens_begin + ArmadaTypes.max_defense_tokens * Encodings.hot_token_size
-        Encodings.unmapSection(encoding[0, def_tokens_begin:def_tokens_end], Encodings.hot_token_size, token_slots)
+        Encodings.unmapSection(encoding[def_tokens_begin:def_tokens_end], Encodings.hot_token_size, token_slots)
 
         # Unshuffle the dice
         dice_begin = Encodings.getAttackDiceOffset()
         dice_end = dice_begin + Encodings.hot_die_size * Encodings.max_die_slots
-        Encodings.unmapSection(section=encoding[0, dice_begin:dice_end], slice_size=Encodings.hot_die_size, slots=die_slots)
+        Encodings.unmapSection(section=encoding[dice_begin:dice_end], slice_size=Encodings.hot_die_size, slots=die_slots)
 
         return encoding
 
@@ -185,7 +185,7 @@ class Encodings():
             (List[int])              : Die slot mapping (source to encoding index)
         """
         attack_enc_size = Encodings.calculateAttackSize()
-        encoding = torch.zeros(1, attack_enc_size)
+        encoding = torch.zeros(attack_enc_size)
 
         # Now populate the tensor
         attack = world_state.attack
@@ -193,18 +193,18 @@ class Encodings():
         attacker = attack.attacker
 
         cur_offset, token_slots = Encodings.encodeShip(defender, attack, encoding)
-        cur_offset += Encodings.encodeShip(attacker, attack, encoding[:,cur_offset:])[0]
+        cur_offset += Encodings.encodeShip(attacker, attack, encoding[cur_offset:])[0]
 
         # Encode whether an accuracy has been spent on the defender tokens
         for token_idx, slot in enumerate(token_slots):
             slot_offset = cur_offset + slot
             if token_idx < len(defender.defense_tokens):
-                encoding[0, slot_offset] = 1 if attack.accuracy_tokens[token_idx] else 0
+                encoding[slot_offset] = 1 if attack.accuracy_tokens[token_idx] else 0
         cur_offset += ArmadaTypes.max_defense_tokens
 
         # Attack range
         for offset, arange in enumerate(ArmadaTypes.ranges):
-            encoding[0, cur_offset + offset] = 1 if arange == attack.range else 0
+            encoding[cur_offset + offset] = 1 if arange == attack.range else 0
         cur_offset += len(ArmadaTypes.ranges)
 
         # Each die will be represented with a hot_die_size vector
@@ -217,14 +217,14 @@ class Encodings():
             slot_offset = cur_offset + slot * Encodings.hot_die_size
             # Encode die colors
             for offset, color in enumerate(ArmadaDice.die_colors):
-                encoding[0, slot_offset + offset] = 1 if color == attack.pool_colors[die_idx] else 0
+                encoding[slot_offset + offset] = 1 if color == attack.pool_colors[die_idx] else 0
             slot_offset += len(ArmadaDice.die_colors)
             # Encode die faces
             for offset, face in enumerate([face for face in ArmadaDice.die_faces.keys()]):
-                encoding[0, slot_offset + offset] = 1 if face == attack.pool_faces[die_idx] else 0
+                encoding[slot_offset + offset] = 1 if face == attack.pool_faces[die_idx] else 0
 
         # Sanity check on the encoding size and the data put into it
-        assert encoding.size(1) == cur_offset + Encodings.hot_die_size * Encodings.max_die_slots
+        assert encoding.size(0) == cur_offset + Encodings.hot_die_size * Encodings.max_die_slots
 
         # TODO FIXME HERE Ship encodings and the location or accuracied and spent tokens have
         # changed so the tests need to be updated
@@ -253,12 +253,14 @@ class Encodings():
         # Start from 0 and build ourselves up
         world_state_size = 0
 
-        # Encoding of the current main and sub phase
+        # TODO Encoding of the current main and sub phase
 
-        # Attack encoding (or 0s if not in an attack phase)
+        # TODO Attack encoding (or 0s if not in an attack phase)
 
-        # Ship encodings
+        # TODO Ship encodings
 
+        # TODO This is the simplest possible thing to do while we are only concerned with attack
+        # states, but must be fixed as we expand beyond that.
         return Encodings.calculateAttackSize() + world_state_size
 
     def calculateActionSize(subphase):
@@ -304,18 +306,22 @@ class Encodings():
 
         encoding = torch.zeros(Encodings.calculateActionSize(subphase))
 
-
         if "attack - resolve attack effects" == subphase:
             # Manipulate dice in the dice pool. Every ability or action that can occur needs to have
             # an encoding here.
             # TODO For now just handle spending accuracy icons. 
             # Each die could be an accuracy and could target any of the defender's tokens.
+
+            # Simple case when there was no action taken.
+            if None == action_tuple:
+                return encoding
             action = action_tuple[0]
             if "accuracy" == action:
-                die_index, token_index = action_tuple[1], action_tuple[2]
-                # Mark the token and spent die
-                encoding[token_index] = 1.
-                encoding[ArmadaTypes.max_defense_tokens + die_index] = 1.
+                for acc_action in action_tuple[1]:
+                    die_index, token_index = acc_action
+                    # Mark the token and spent die
+                    encoding[token_index] = 1.
+                    encoding[ArmadaTypes.max_defense_tokens + die_index] = 1.
             else:
                 raise NotImplementedError(
                     "Action {} unimplemented for attack phase {}.".format(action, subphase))
@@ -328,13 +334,17 @@ class Encodings():
             # The "redirect" token targets one (or more with certain upgrades) hull zones.
             # TODO Just covering tokens for now.
 
+            # Simple case when there was no action taken.
+            if None == action_tuple[0]:
+                return encoding
+
             # Offsets used during encodings
             evade_offset = len(ArmadaTypes.defense_tokens) + ArmadaTypes.max_defense_tokens
             redirect_offset = evade_offset + Encodings.max_die_slots
 
             action = action_tuple[0]
             # Verify that we can handle this action
-            if action not in ArmadaTypes.defense_tokens:
+            if action not in ArmadaTypes.defense_tokens and "none" != action:
                 raise NotImplementedError(
                     "{} unimplemented for attack phase {}.".format(action, subphase))
 
@@ -362,5 +372,6 @@ class Encodings():
         else:
             raise NotImplementedError(
                 "Encoding for attack phase {} not implemented.".format(subphase))
+        return encoding
 
 

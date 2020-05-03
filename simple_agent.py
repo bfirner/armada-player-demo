@@ -13,8 +13,8 @@ class SimpleAgent(BaseAgent):
     def __init__(self):
         """Initialize the simple agent with a couple of simple state handlers."""
         handler = {
-                "attack - resolve attack effects": self.resolveAttackEffects,
-                "attack - spend defense tokens": self.spendDefenseTokens
+                "ship phase - attack - resolve attack effects": self.resolveAttackEffects,
+                "ship phase - attack - spend defense tokens": self.spendDefenseTokens
         }
         super(SimpleAgent, self).__init__(handler)
 
@@ -34,7 +34,7 @@ class SimpleAgent(BaseAgent):
                                 ("add", colors), ("reroll", indices), or ("remove", indices)
         """
         # We only handle one sub-phase in this function
-        assert world_state.full_phase == "attack - resolve attack effects"
+        assert world_state.full_phase == "ship phase - attack - resolve attack effects"
 
         attack = world_state.attack
         defender = attack.defender
@@ -140,7 +140,7 @@ class SimpleAgent(BaseAgent):
                             target hull zone and the amount of damage to direct to that hull zone.
         """
         # We only handle one sub-phase in this function
-        assert world_state.full_phase == "attack - spend defense tokens"
+        assert world_state.full_phase == "ship phase - attack - spend defense tokens"
 
         attack = world_state.attack
         defender = attack.defender

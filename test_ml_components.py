@@ -84,12 +84,12 @@ def test_token_encodings():
     two_contain = ship.Ship(name="Double Contain", template=ship_templates["Double Contain"], upgrades=[], player_number=2)
     two_scatter = ship.Ship(name="Double Scatter", template=ship_templates["Double Scatter"], upgrades=[], player_number=2)
 
-    enc_one_brace = make_encoding(no_token, one_brace, "short", agent)[0][0]
-    enc_two_brace = make_encoding(one_brace, two_brace, "short", agent)[0][0]
-    enc_two_redirect = make_encoding(two_brace, two_redirect, "short", agent)[0][0]
-    enc_two_evade = make_encoding(two_redirect, two_evade, "short", agent)[0][0]
-    enc_two_contain = make_encoding(two_evade, two_contain, "short", agent)[0][0]
-    enc_two_scatter = make_encoding(two_contain, two_scatter, "short", agent)[0][0]
+    enc_one_brace = make_encoding(no_token, one_brace, "short", agent)[0]
+    enc_two_brace = make_encoding(one_brace, two_brace, "short", agent)[0]
+    enc_two_redirect = make_encoding(two_brace, two_redirect, "short", agent)[0]
+    enc_two_evade = make_encoding(two_redirect, two_evade, "short", agent)[0]
+    enc_two_contain = make_encoding(two_evade, two_contain, "short", agent)[0]
+    enc_two_scatter = make_encoding(two_contain, two_scatter, "short", agent)[0]
     
     # Order of tokens in the encoding
     # token_types = ["evade", "brace", "scatter", "contain", "redirect"]
@@ -142,11 +142,11 @@ def test_red_token_encodings():
     for i, token in enumerate(two_scatter.defense_tokens):
         two_scatter.defense_tokens[i] = token.replace("green", "red")
 
-    enc_two_brace = make_encoding(attacker, two_brace, "short", agent)[0][0]
-    enc_two_redirect = make_encoding(attacker, two_redirect, "short", agent)[0][0]
-    enc_two_evade = make_encoding(attacker, two_evade, "short", agent)[0][0]
-    enc_two_contain = make_encoding(attacker, two_contain, "short", agent)[0][0]
-    enc_two_scatter = make_encoding(attacker, two_scatter, "short", agent)[0][0]
+    enc_two_brace = make_encoding(attacker, two_brace, "short", agent)[0]
+    enc_two_redirect = make_encoding(attacker, two_redirect, "short", agent)[0]
+    enc_two_evade = make_encoding(attacker, two_evade, "short", agent)[0]
+    enc_two_contain = make_encoding(attacker, two_contain, "short", agent)[0]
+    enc_two_scatter = make_encoding(attacker, two_scatter, "short", agent)[0]
     
     # Check the red token section
     ttensor = torch.zeros(len(ArmadaTypes.defense_tokens))
@@ -179,7 +179,6 @@ def test_spent_encodings():
     defender = ship.Ship(name="Defender", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
 
     encoding, world_state = make_encoding(attacker, defender, "short", agent)
-    encoding = encoding[0]
 
     # The defense token spent section begins after the defender's shields and hull
     spent_begin = 1 + len(ArmadaTypes.hull_zones)
@@ -198,7 +197,7 @@ def test_spent_encodings():
 
     encoding, defense_token_mapping, die_slot_mapping = Encodings.encodeAttackState(world_state)
     Encodings.inPlaceUnmap(encoding, defense_token_mapping, die_slot_mapping)
-    assert torch.sum(encoding[0][spent_begin:spent_end].masked_select(spent_mask)) == len(defender.defense_tokens)
+    assert torch.sum(encoding[spent_begin:spent_end].masked_select(spent_mask)) == len(defender.defense_tokens)
 
     # Try spending the tokens at different indices
     for tidx in range(len(defender.defense_tokens)):
@@ -209,8 +208,8 @@ def test_spent_encodings():
         world_state.attack.defender_spend_token(tidx)
         encoding, defense_token_mapping, die_slot_mapping = Encodings.encodeAttackState(world_state)
         encoding = Encodings.inPlaceUnmap(encoding, defense_token_mapping, die_slot_mapping)
-        assert torch.sum(encoding[0][spent_begin:spent_end].masked_select(spent_mask)) == 1.0
-        assert encoding[0][spent_begin:spent_end].masked_select(spent_mask)[tidx] == 1.0
+        assert torch.sum(encoding[spent_begin:spent_end].masked_select(spent_mask)) == 1.0
+        assert encoding[spent_begin:spent_end].masked_select(spent_mask)[tidx] == 1.0
 
 
 def test_accuracy_encodings():
@@ -234,14 +233,13 @@ def test_accuracy_encodings():
     red_offset = len(ArmadaTypes.defense_tokens) + ArmadaTypes.token_colors.index("red")
 
     # Verify that no tokens are targeted at first 
-    assert 0.0 == enc_three_brace[0, token_begin:token_end].sum()
+    assert 0.0 == enc_three_brace[token_begin:token_end].sum()
 
     # Now target the red token
     world_state.attack.accuracy_tokens[len(three_brace.defense_tokens) - 1] = True
     encoding, dt_mapping, die_mapping = Encodings.encodeAttackState(world_state)
-    enc_three_brace = Encodings.inPlaceUnmap(encoding, dt_mapping, die_mapping)[0]
+    enc_three_brace = Encodings.inPlaceUnmap(encoding, dt_mapping, die_mapping)
 
-    print("token encoding is {}".format(enc_three_brace[token_begin:token_end]))
     # Verify that only the red token has the accuracy flag set
     for token_idx in range(len(three_brace.defense_tokens)):
         if "green" in three_brace.defense_tokens[token_idx]:
@@ -254,7 +252,7 @@ def test_accuracy_encodings():
     world_state.attack.accuracy_tokens[1] = True
     world_state.attack.accuracy_tokens[2] = False
     encoding, dt_mapping, die_mapping = Encodings.encodeAttackState(world_state)
-    enc_three_brace = Encodings.inPlaceUnmap(encoding, dt_mapping, die_mapping)[0]
+    enc_three_brace = Encodings.inPlaceUnmap(encoding, dt_mapping, die_mapping)
 
     # Verify that only the green tokens have the accuracy flag set
     for token_slot in range(ArmadaTypes.max_defense_tokens):
@@ -268,7 +266,7 @@ def test_accuracy_encodings():
     world_state.attack.accuracy_tokens[1] = True
     world_state.attack.accuracy_tokens[2] = True
     encoding, dt_mapping, die_mapping = Encodings.encodeAttackState(world_state)
-    enc_three_brace = Encodings.inPlaceUnmap(encoding, dt_mapping, die_mapping)[0]
+    enc_three_brace = Encodings.inPlaceUnmap(encoding, dt_mapping, die_mapping)
 
     # Verify that all tokens have the accuracy flag set
     assert 3.0 == enc_three_brace[token_begin:token_end].sum()
@@ -285,7 +283,7 @@ def test_range_encodings():
 
     range_begin = Encodings.getAttackRangeOffset()
     for offset, attack_range in enumerate(ArmadaTypes.ranges):
-        enc_attack = make_encoding(attacker, no_token, attack_range, agent)[0][0]
+        enc_attack = make_encoding(attacker, no_token, attack_range, agent)[0]
         assert torch.sum(enc_attack[range_begin:range_begin + len(ArmadaTypes.ranges)]) == 1
         assert 1.0 == enc_attack[range_begin + offset].item()
 
@@ -311,7 +309,7 @@ def test_roll_encodings():
         world_state.updateAttack(attack)
         # Make a random roll and encode the attack state
         # [ color - 3, face - 6]
-        enc_attack = Encodings.encodeAttackState(world_state)[0][0]
+        enc_attack = Encodings.encodeAttackState(world_state)[0]
         # Try to find a match for each color,face pair
         for slot in range(Encodings.max_die_slots):
             begin = dice_begin + slot * Encodings.hot_die_size

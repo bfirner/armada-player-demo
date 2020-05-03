@@ -15,8 +15,8 @@ class RandomAgent(BaseAgent):
     def __init__(self):
         """Initialize the agent with a couple of state handlers."""
         handler = {
-                "attack - resolve attack effects": self.resolveAttackEffects,
-                "attack - spend defense tokens": self.spendDefenseTokens
+                "ship phase - attack - resolve attack effects": self.resolveAttackEffects,
+                "ship phase - attack - spend defense tokens": self.spendDefenseTokens
         }
         super(RandomAgent, self).__init__(handler)
 
@@ -37,7 +37,7 @@ class RandomAgent(BaseAgent):
                                 ("add", colors), ("reroll", indices), or ("remove", indices)
         """
         # We only handle one sub-phase in this function
-        assert world_state.full_phase == "attack - resolve attack effects"
+        assert world_state.full_phase == "ship phase - attack - resolve attack effects"
 
         attack = world_state.attack
         defender = attack.defender
@@ -55,12 +55,20 @@ class RandomAgent(BaseAgent):
             return None
         # Keep track of which tokens are locked with accuracies
         targets = []
+        # Don't attempt to accuracy more things that what exists.
+        if len(accuracies) > len(attack.defender.defense_tokens):
+            accuracies = accuracies[:len(attack.defender.defense_tokens)]
         for acc in accuracies:
             # Randomly choose to use the accuracy or not. It is okay if this is a bit biased towards
             # using the accuracy so we will just choose randomly one of the existing tokens or no
             # token.
-            target = random.randint(0, len(attack.defender.defense_tokens) + 1)
-            targets.append((acc, target))
+            target = random.randint(0, len(attack.defender.defense_tokens) - len(targets))
+            if target < (len(attack.defender.defense_tokens) - len(targets)):
+                # Avoid targetting the same die more than once. It is cancelled by the accuracy so it is
+                # not possible to target multiple times.
+                while 0 < len([t for t in targets if t[1] == target]):
+                    target += 1
+                targets.append((acc, target))
         if 0 < len(targets):
             return ("accuracy", targets)
         else:
@@ -81,7 +89,7 @@ class RandomAgent(BaseAgent):
                             target hull zone and the amount of damage to direct to that hull zone.
         """
         # We only handle one sub-phase in this function
-        assert world_state.full_phase == "attack - spend defense tokens"
+        assert world_state.full_phase == "ship phase - attack - spend defense tokens"
 
         attack = world_state.attack
         defender = attack.defender
@@ -97,8 +105,9 @@ class RandomAgent(BaseAgent):
         # discard tokens for some reason. The agent should at least learn to not always spend
         # tokens.
 
-        # Let's skip spending more tokens if we have already decided to scatter though.
-        if attack.token_type_spent('scatter'):
+        # Let's skip spending more tokens if we have already decided to scatter though or if there
+        # are no dice in the pool.
+        if attack.token_type_spent('scatter') or 0 == len(attack.pool_faces):
             return (None, None)
 
         # Randomly pick tokens to use from the token types available that have not been targetted
@@ -113,8 +122,11 @@ class RandomAgent(BaseAgent):
                     # Provide targets for the token
                     if 'evade' == ttype and attack.range != 'short':
                         # Choose one random dice, or two at extreme range.
-                        dice = random.randint(0, len(attack.pool_faces) - 1)
-                        if attack.range == 'extreme':
+                        if 1 == len(attack.pool_faces):
+                            dice = 0
+                        else:
+                            dice = random.randint(0, len(attack.pool_faces) - 1)
+                        if attack.range == 'extreme' and 1 < len(attack.pool_faces):
                             # Select a random number that is not the last one possible. If we
                             # selected the same number as before then it could not be the last
                             # number. Switch the die to the last number.

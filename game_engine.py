@@ -23,7 +23,7 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
     Returns:
         world_state (table) : The world state after the attack completes.
     """
-    world_state.setPhase("attack", "")
+    world_state.setPhase("ship phase", "attack - roll atack dice")
 
     # TODO Effects that occur before the roll should happen here (obstruction, Sato, etc)
 
@@ -64,7 +64,7 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
 
 
     # TODO Roll the phase into the world state
-    world_state.setSubPhase("resolve attack effects")
+    world_state.setSubPhase("attack - resolve attack effects")
 
     # Log if the log is present
     if state_log is not None:
@@ -87,19 +87,19 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
                 # that require the indexes to stay the same
                 spent_dice.append(die_index)
                 # A token targeted with an accuracy cannot be spent normally
-                acc_tokens.append(token_index)
+                acc_tokens[token_index] = True
             # Remove the spent dice
             for index in sorted(spent_dice, reverse=True):
                 del pool_faces[index]
                 del pool_colors[index]
         # TODO Handle more effects at some point
         # Get the next attack effect
-        # TODO Update the world state for the removed dice and accuracied tokens
-        # TODO Are all of these things references? Not 100% clear if this needs to be called again,
-        # but it may also trigger some logging. The design here should be more clear, and maybe the
+        # TODO The design here should be more clear, and maybe the
         # world state should be modified through an interface instead of through modifying internal
-        # variables.
-        attack = AttackState(attack_range, attacker[0], attacker[1], defender[0], defender[1], pool_colors, pool_faces)
+        # variables. Maybe we should recreate the attack stack if there is internal logging.
+        #attack = AttackState(attack_range, attacker[0], attacker[1], defender[0], defender[1], pool_colors, pool_faces)
+        #attack.accuracy_tokens = acc_tokens
+        #attack.spent_types = spent_types
         world_state.updateAttack(attack)
         # Log if the log is present
         if state_log is not None:
@@ -110,7 +110,7 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
             state_log.append(('action', attack_effect_tuple))
         # TODO FIXME The action and world state should be encoded and logged
 
-    world_state.setSubPhase("spend defense tokens")
+    world_state.setSubPhase("attack - spend defense tokens")
     # Log if the log is present
     if state_log is not None:
         state_log.append(('state', world_state.clone()))
@@ -186,7 +186,7 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
             # Reduce the damage left
             damage = damage - redirect_amount
 
-    world_state.setSubPhase("resolve damage")
+    world_state.setSubPhase("attack - resolve damage")
 
     # Deal remaining damage to the shield in the defending hull zone
     hull_damage += defender[0].shield_damage(defender[1], damage)

@@ -112,7 +112,6 @@ class Ship:
             self.shields["left-auxiliary"] = int(self.attributes["shields left auxiliary"])
             self.shields["right-auxiliary"] = int(self.attributes["shields right auxiliary"])
         self.defense_tokens = []
-        offset = len("defense token ")
         for token in ArmadaTypes.defense_tokens:
             str_token = "defense token " + token
             # Insert a green token for each available token
@@ -189,6 +188,9 @@ class Ship:
             amount -= self.shields[zone]
             self.shields[zone] = 0
             self._hull -= amount
+        # Hull cannot be negative.
+        if 0 > self._hull:
+            self._hull = 0
 
     def hull(self):
         return self._hull
