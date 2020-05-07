@@ -288,7 +288,15 @@ class Encodings():
             # The "evade" targets one (or more) of the attackers dice.
             # The "redirect" token targets one (or more with certain upgrades) hull zones.
             # TODO Just covering tokens for now.
-            return 4 + Encodings.max_die_slots + len(ArmadaTypes.hull_zones)
+
+            # The encoding begins with which types of tokens were spent and which of the defender's
+            # specific tokens were spent.
+            token_size = len(ArmadaTypes.defense_tokens) + ArmadaTypes.max_defense_tokens
+            # Evade indicates which dice were affected
+            evade_size = Encodings.max_die_slots
+            # Redirect indicates which hull zones were affected
+            redirect_size = len(ArmadaTypes.hull_zones)
+            return token_size + evade_size + redirect_size
         else:
             raise NotImplementedError(
                 "Encoding for attack phase {} not implemented.".format(subphase))
@@ -351,22 +359,22 @@ class Encodings():
             # Handle the tokens that do not require targets
             for ttype in ["brace", "scatter", "contain", "salvo"]:
                 if ttype == action:
-                    token_index = action_tuple[1]
+                    token_index = action_tuple[1][0]
                     encoding[ArmadaTypes.defense_tokens.index(ttype)] = 1.
                     encoding[len(ArmadaTypes.defense_tokens) + token_index] = 1.
             # Handle the tokens with targets
             if "evade" == action:
-                token_index = action_tuple[1]
-                encoding[ArmadaTypes.defense_tokens.index(evade)] = 1.
+                token_index = action_tuple[1][0]
+                encoding[ArmadaTypes.defense_tokens.index(action)] = 1.
                 encoding[len(ArmadaTypes.defense_tokens) + token_index] = 1.
-                targets = action_tuple[2]
+                targets = action_tuple[1][1:]
                 for target in targets:
                     encoding[evade_offset + target] = 1.
             elif "redirect" == action:
-                token_index = action_tuple[1]
-                encoding[ArmadaTypes.defense_tokens.index(evade)] = 1.
+                token_index = action_tuple[1][0]
+                encoding[ArmadaTypes.defense_tokens.index(action)] = 1.
                 encoding[len(ArmadaTypes.defense_tokens) + token_index] = 1.
-                targets = action_tuple[2]
+                targets = action_tuple[1][1]
                 for target, amount in targets:
                     encoding[redirect_offset + ArmadaTypes.hull_zones.index(target)] = amount
         else:

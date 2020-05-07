@@ -144,7 +144,7 @@ class RandomAgent(BaseAgent):
                         # Redirection must also specify the amount of damage to send to
                         # each hull zone so return (ttype, (tindx, (hull, damage)))
                         damage = random.randint(0, ArmadaDice.pool_damage(pool_faces))
-                        return (ttype, (tindx, (hull, damage)))
+                        return (ttype, (tindx, [(hull, damage)]))
                         # TODO Advanced projectors or the foresight title allow redirection to
                         # multiple hull zones.
 

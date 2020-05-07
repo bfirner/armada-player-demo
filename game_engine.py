@@ -134,7 +134,7 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
                 world_state.attack.defender_spend_token(token)
                 # Only redirect and evade have additional targets
                 if "redirect" == token_type:
-                    redirects = effect_args[1:]
+                    redirects = effect_args[1]
                 elif "evade" == token_type:
                     # Need to evade a specific die (or multiple if allowed by distance or by card effect)
                     for die_index in effect_args[1:]:
