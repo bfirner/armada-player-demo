@@ -25,14 +25,15 @@ def a_vs_b(ship_a, ship_b, agent_a, agent_b, ship_a_hull, trials, attack_range):
     """This function runs multiple trials of ship_a firing upon ship_b.
 
     Args:
-      ship_a ((Ship, str)): Attacker and hull zone tuple.
-      ship_b ((Ship, str)): Defender and hull zone tuple.
-      agent_a  (BaseAgent): Agent to control the actions of ship a.
-      agent_b  (BaseAgent): Agent to control the actions of ship b.
-      ship_a_hull (str)   : Attacking hull zone.
-      trials (int): Number of trials in average calculation.
-      range (str): Attack range.
-    
+        ship_a ((Ship, str)): Attacker and hull zone tuple.
+        ship_b ((Ship, str)): Defender and hull zone tuple.
+        agent_a  (BaseAgent): Agent to control the actions of ship a.
+        agent_b  (BaseAgent): Agent to control the actions of ship b.
+        ship_a_hull (str)   : Attacking hull zone.
+        trials (int): Number of trials in average calculation.
+        range (str): Attack range.
+    Returns:
+        List[(str, world_state or attack effect tuple)]
     """
     state_log = []
     failures = 0
@@ -114,6 +115,12 @@ def update_lifetime_network(lifenet, batch, labels, optimizer, eval_only=False):
 def collect_attack_batches(batch, labels, attacks, subphase):
     """A generator to collect training batches from a list of attack logs.
 
+    Collect all of the actions taken during the resolve attack effects stage of a trial and
+    associate them with the number of additional attacks required to end the trial.  Only sample a
+    single action-state pair from each trial into the training batch though. This avoids the network
+    simply memorizing the output of specific scenarios in the event of fairly unique events (for
+    example a certain unlikely dice roll or combination of shields and hull in the defending ship).
+
     Args:
         batch (torch.Tensor)        : Training tensor to fill. First dimension is the batch size.
         labels (torch.Tensor)       : Labels tensor. First dimension must batch the batch argument.
@@ -177,52 +184,26 @@ def collect_attack_batches(batch, labels, attacks, subphase):
         yield(cur_sample)
 
 
-def test_random_agent():
-    """Test basic network learning loop.
+@pytest.fixture(scope="session")
+def create_training_dataset():
+    """Create a training dataset.
 
-    Creat a simple network to spend defense tokens. Verify that it extends lifetimes.
-    Then train a network to spend accuracy icons. Verify that it reduces lifetimes.
+    Returns:
+        (List[(str, world_state or attack effect tuple)],
+         List[(str, world_state or attack effect tuple)]): Tuple of training and evaluation data.
     """
     # Seed the RNG and make sure this test is deterministic
     torch.manual_seed(0)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+    # TODO FIXME See all RNGs so that tests cannot fail intermittently
 
     # TODO FIXME Remember to see the regular Python RNG as well
     randagent = RandomAgent()
 
-    target_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # TODO FIXME See all RNGs so that this test cannot fail intermittently
-    loss_fn = torch.nn.MSELoss()
-
-    attacker = ship.Ship(name="Attacker", template=ship_templates["Attacker"], upgrades=[], player_number=1)
-
     ship_a = ship.Ship(name="Ship A", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=1)
     ship_b = ship.Ship(name="Ship B", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
 
-    # Lifetime network A predicts lifetimes given a state and action pair in the 'resolve attack
-    # effects' subphase.
-    a_phase = "attack - resolve attack effects"
-    a_input_size = Encodings.calculateActionSize(a_phase) + Encodings.calculateWorldStateSize()
-    a_network = torch.nn.Sequential(
-        torch.nn.Linear(a_input_size, 2 * a_input_size),
-        torch.nn.ELU(),
-        torch.nn.Linear(2 * a_input_size, 4 * a_input_size),
-        torch.nn.ELU(),
-        #torch.nn.BatchNorm1d(4 * a_input_size),
-        torch.nn.Linear(4 * a_input_size, a_input_size),
-        torch.nn.ELU(),
-        torch.nn.Linear(a_input_size, 1))
-    a_network.to(target_device)
-    # Higher learning rates lead to a lot of instability in the training.
-    a_optimizer = torch.optim.Adam(a_network.parameters(), lr=0.0005)
-
-    # Create an evaluation dataset
-    # Using a large batch for evaluation makes it easier to look at statistics since there is so
-    # much noise in the samples.
-    eval_size = 250
-    eval_batch = torch.Tensor(eval_size, a_input_size).to(target_device)
-    eval_labels = torch.Tensor(eval_size, 1).to(target_device)
     eval_attacks = []
     for _ in range(250):
         # At short range all hull zones can attack, otherwise only the front zone can attack.
@@ -248,38 +229,158 @@ def test_random_agent():
             ship_a = ship_a, ship_b = ship_b, agent_a = randagent, agent_b = randagent,
             ship_a_hull = hull, trials = 1, attack_range = attack_range)
 
-    batch_size = 32
-    batch = torch.Tensor(batch_size, a_input_size).to(target_device)
-    labels = torch.Tensor(batch_size, 1).to(target_device)
-    # Collect all of the actions taken during the resolve attack effects stage of a trial and
-    # associate them with the number of additional attacks required to end the trial.
-    # Only sample a single action-state pair from each trial into the training batch though. This
-    # avoids the network simply memorizing the output of specific scenarios in the event of fairly
-    # unique events (for example a certain unlikely dice roll or combination of shields and hull in
-    # the defending ship).
+    return attacks, eval_attacks
+
+
+@pytest.fixture(scope="session")
+def resolve_attack_effects_model(create_training_dataset):
+    """Train some basic lifetime prediction models.
+
+    Create a simple network that predict defending ship lifetimes during the 'resolve attack
+    effects' phase. Also creates logs of training and evaluation loss.
+
+    Returns:
+        (nn.module, list[int], list[int]): The model, training loss, and evaluation loss.
+    """
+    attacks, eval_attacks = create_training_dataset
+
+    target_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Lifetime network A predicts lifetimes given a state and action pair in the 'resolve attack
+    # effects' subphase.
+    phase_name = "attack - resolve attack effects"
+    input_size = Encodings.calculateActionSize(phase_name) + Encodings.calculateWorldStateSize()
+    # The network size was made large enough that training plateaued to a stable value
+    # If the network is too large it has a tendency to start fitting to specific cases.
+    # Batchnorm doesn't seem to help out much with this network and task.
+    network = torch.nn.Sequential(
+        torch.nn.Linear(input_size, 2 * input_size),
+        torch.nn.ELU(),
+        torch.nn.Linear(2 * input_size, 4 * input_size),
+        torch.nn.ELU(),
+        #torch.nn.Dropout(),
+        #torch.nn.BatchNorm1d(4 * input_size),
+        torch.nn.Linear(4 * input_size, 2 * input_size),
+        torch.nn.ELU(),
+        torch.nn.Linear(2 * input_size, 1))
+    network.to(target_device)
+    # Higher learning rates lead to a lot of instability in the training.
+    a_optimizer = torch.optim.Adam(network.parameters(), lr=0.0005)
+
+    # Create an evaluation dataset
+    # Using a large batch for evaluation makes it easier to look at statistics since there is so
+    # much noise in the samples.
+    eval_size = 250
+    eval_batch = torch.Tensor(eval_size, input_size).to(target_device)
+    eval_labels = torch.Tensor(eval_size, 1).to(target_device)
 
     # Keep track of the errors for the purpose of this test
     errors = []
     eval_errors = []
 
     # Grab a batch to evaluate
-    for _ in collect_attack_batches(eval_batch, eval_labels, eval_attacks, a_phase):
+    for _ in collect_attack_batches(eval_batch, eval_labels, eval_attacks, phase_name):
         pass
 
-    # Evaluate before training and every batch, which is total overkill
-    eval_errors.append(update_lifetime_network(a_network, eval_batch,
+    # Evaluate before training and every epoch
+    eval_errors.append(update_lifetime_network(network, eval_batch,
                                                eval_labels, None, True))
-    # Leave some for evaluation
-    for num_samples in collect_attack_batches(batch, labels, attacks[:-eval_size], a_phase):
-        errors.append(update_lifetime_network(a_network, batch[:num_samples],
-                                              labels[:num_samples], a_optimizer))
-        # Evaluate every batch, which is total overkill
-        eval_errors.append(update_lifetime_network(a_network, eval_batch,
+
+    batch_size = 32
+    batch = torch.Tensor(batch_size, input_size).to(target_device)
+    labels = torch.Tensor(batch_size, 1).to(target_device)
+    # Train with all of the data for 10 epochs
+    for epoch in range(10):
+        for num_samples in collect_attack_batches(batch, labels, attacks[:-eval_size], phase_name):
+            errors.append(update_lifetime_network(network, batch[:num_samples],
+                                                  labels[:num_samples], a_optimizer))
+        # Evaluate every epoch
+        eval_errors.append(update_lifetime_network(network, eval_batch,
                                                    eval_labels, None, True))
 
+    return network, errors, eval_errors
+
+
+@pytest.fixture(scope="session")
+def spend_defense_tokens_model(create_training_dataset):
+    """Train some basic lifetime prediction models.
+
+    Create simple networks that predict defending ship lifetimes during the 'spend defese tokens'
+    phase and during the 'resolve attack effects' phase.
+
+    Returns:
+        (nn.module, nn.module,): The 'resolve attack effects' and 'spend defense tokens' models.
+    """
+    attacks, eval_attacks = create_training_dataset
+
+    target_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Lifetime network B predicts lifetimes given a state and action pair in the 'spend defense
+    # tokens' subphase.
+    phase_name = "attack - spend defense tokens"
+    input_size = Encodings.calculateActionSize(phase_name) + Encodings.calculateWorldStateSize()
+    network = torch.nn.Sequential(
+        torch.nn.Linear(input_size, 2 * input_size),
+        torch.nn.ELU(),
+        torch.nn.Linear(2 * input_size, 4 * input_size),
+        torch.nn.ELU(),
+        torch.nn.Linear(4 * input_size, input_size),
+        torch.nn.ELU(),
+        torch.nn.Linear(input_size, 1))
+    network.to(target_device)
+    optimizer = torch.optim.Adam(network.parameters(), lr=0.0005)
+    batch_size = 32
+    batch = torch.Tensor(batch_size, input_size).to(target_device)
+
+    # Create an evaluation dataset
+    # Using a large batch for evaluation makes it easier to look at statistics since there is so
+    # much noise in the samples.
+    eval_size = 250
+    eval_batch = torch.Tensor(eval_size, input_size).to(target_device)
+    eval_labels = torch.Tensor(eval_size, 1).to(target_device)
+
+    # Keep track of the errors for the purpose of this test
+    errors = []
+    eval_errors = []
+
+    # Grab a batch to evaluate
+    for _ in collect_attack_batches(eval_batch, eval_labels, eval_attacks, phase_name):
+        pass
+
+    # Evaluate before training and every epoch
+    eval_errors.append(update_lifetime_network(network, eval_batch,
+                                               eval_labels, None, True))
+
+    batch_size = 32
+    batch = torch.Tensor(batch_size, input_size).to(target_device)
+    labels = torch.Tensor(batch_size, 1).to(target_device)
+
+    for num_samples in collect_attack_batches(batch, labels, attacks, phase_name):
+        errors.append(update_lifetime_network(network, batch[:num_samples],
+                                              labels[:num_samples], optimizer))
+        # Evaluate every epoch
+        eval_errors.append(update_lifetime_network(network, eval_batch,
+                                                   eval_labels, None, True))
+
+    return network, errors, eval_errors
+
+
+def test_resolve_attack_effects_model(resolve_attack_effects_model):
+    """Test basic network learning loop.
+
+    Test lifetime predictions during the resolve attack effects phase.
+    """
+    a_network, errors, eval_errors = resolve_attack_effects_model
+    phase_name = "attack - resolve attack effects"
+    input_size = Encodings.calculateActionSize(phase_name) + Encodings.calculateWorldStateSize()
+
+    target_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    batch_size = 32
+    batch = torch.Tensor(batch_size, input_size).to(target_device)
+
     # First verify that errors decreased during training.
-    #print("Errors for A were {}".format(errors))
-    #print("Eval errors for A were {}".format(eval_errors))
+    # print("Errors for A were {}".format(errors))
+    print("Eval errors for A were {}".format(eval_errors))
     assert eval_errors[0] > eval_errors[-1]
 
     # Let's examine predictions for different ranges and hull zones.
@@ -328,44 +429,35 @@ def test_random_agent():
 
     lifetime_out = a_network(batch[:4])
 
-    # The lifetimes should go up as with the above scenarios
+    # The lifetimes should go up sequentially with the above scenarios
     #print("Lifetimes from A are {}".format(lifetime_out))
     for i in range(3):
         assert(lifetime_out[i].item() < lifetime_out[i+1].item())
 
-    # So I take back what I said, in another test train a network to
-    # predict lifetimes during the 'attack - spend defense tokens' step and verify that things are
-    # as expected there. After that make this third test to actually train the action prediction
-    # networks.
-    # Lifetime network B predicts lifetimes given a state and action pair in the 'spend defense
-    # tokens' subphase.
-    b_phase = "attack - spend defense tokens"
-    b_input_size = Encodings.calculateActionSize(b_phase) + Encodings.calculateWorldStateSize()
-    b_network = torch.nn.Sequential(
-        torch.nn.Linear(b_input_size, 2 * b_input_size),
-        torch.nn.ELU(),
-        torch.nn.Linear(2 * b_input_size, 4 * b_input_size),
-        torch.nn.ELU(),
-        torch.nn.Linear(4 * b_input_size, b_input_size),
-        torch.nn.ELU(),
-        torch.nn.Linear(b_input_size, 1))
-    b_network.to(target_device)
-    b_optimizer = torch.optim.Adam(b_network.parameters(), lr=0.0005)
-    batch = torch.Tensor(batch_size, b_input_size).to(target_device)
 
-    # Keep track of the errors for the purpose of this test
-    errors = []
+def test_defense_tokens_model(spend_defense_tokens_model):
+    """Test basic network learning loop.
 
-    for num_samples in collect_attack_batches(batch, labels, attacks, b_phase):
-        errors.append(update_lifetime_network(b_network, batch[:num_samples],
-                                              labels[:num_samples], b_optimizer))
+    Test lifetime predictions during the spend defense tokens phase.
+    """
+    network, errors, eval_errors = spend_defense_tokens_model
 
-    #print("First and last errors in b are {} and {}".format(errors[0], errors[-1]))
-    #print("All errors in b are {}".format(errors))
+    # TODO FIXME Add some "common sense" tests
 
-    assert errors[0] > errors[-1]
+    print("First and last errors in b are {} and {}".format(errors[0], errors[-1]))
+    print("All errors in b are {}".format(errors))
 
-    # TODO FIXME Add more "reasonable tests" as with network a.
+    assert eval_errors[0] > eval_errors[-1]
+
+
+def test_policy_network(resolve_attack_effects_model, spend_defense_tokens_model):
+    """Test basic network learning loop.
+
+    Create a simple network to spend defense tokens. Verify that it extends lifetimes.
+    Then train a network to spend accuracy icons. Verify that it reduces lifetimes.
+    """
+
+    # Test to actually train the action prediction networks.
 
     # TODO FIXME HERE It would make more sense to just move on to training behaviors.
     # Make a new test to start training actions that yield the highest lifetimes.
