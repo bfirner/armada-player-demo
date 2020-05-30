@@ -1,7 +1,17 @@
 # Copyright Bernhard Firner, 2020
 # Should be run with pytest:
 # > python3 -m pytest
+# For profiling:
+# > python3 -m pytest test_learning.py --profile
+# And then
+# >>> import pstats
+# >>> p = pstats.Stats('./prof/combined.prof')
+# >>> p.strip_dirs()
+# >>> p.sort_stats('cumtime')
+# >>> p.print_stats(50)
+# Or just call snakeviz on the prof file.
 
+import multiprocessing
 import numpy
 import pytest
 import random
@@ -184,6 +194,33 @@ def collect_attack_batches(batch, labels, attacks, subphase):
         yield(cur_sample)
 
 
+def get_n_examples(n_examples, ship_a, ship_b, agent, queue):
+    """Smallest function to get 'n' examples of a_vs_b.
+
+    This function is meant to be called in parallel to more quickly create training data.
+
+    Arguments:
+        n_examples (int)     : The number of examples to generate.
+        ship_a (Ship)        : The attacking ship.
+        ship_b (Ship)        : The defending ship.
+        agent (LearningAgent): The agent to choose actions.
+        queue (Queue)        : Message passing queue through which to return examples.
+    """
+    attacks = []
+    for _ in range(n_examples):
+        # At short range all hull zones can attack, otherwise only the front zone can attack.
+        attack_range = random.choice(['long', 'medium', 'short', 'short', 'short', 'short'])
+        if attack_range == 'short':
+            hull = random.choice(ArmadaTypes.hull_zones)
+        else:
+            hull = 'front'
+        attacks = attacks + a_vs_b(
+            ship_a = ship_a, ship_b = ship_b, agent_a = agent, agent_b = agent,
+            ship_a_hull = hull, trials = 1, attack_range = attack_range)
+    queue.put(attacks)
+
+
+
 @pytest.fixture(scope="session")
 def create_training_dataset():
     """Create a training dataset.
@@ -198,36 +235,42 @@ def create_training_dataset():
     torch.backends.cudnn.benchmark = False
     # TODO FIXME See all RNGs so that tests cannot fail intermittently
 
-    # TODO FIXME Remember to see the regular Python RNG as well
+    # TODO FIXME Remember to seed the regular Python RNG as well
     randagent = RandomAgent()
 
     ship_a = ship.Ship(name="Ship A", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=1)
     ship_b = ship.Ship(name="Ship B", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
 
+    # Make this parallel so that more samples can be quickly generated
+    processes = []
+    queues = []
+    # Run 250 trials for evaluation
+    eval_threads = 10
+    for _ in range(eval_threads):
+        # At short range all hull zones can attack, otherwise only the front zone can attack.
+        queues.append(multiprocessing.Queue())
+        processes.append(multiprocessing.Process(
+            target=get_n_examples, args=(30, ship_a, ship_b, randagent, queues[-1])))
+        processes[-1].start()
     eval_attacks = []
-    for _ in range(250):
-        # At short range all hull zones can attack, otherwise only the front zone can attack.
-        attack_range = random.choice(['long', 'medium', 'short', 'short', 'short', 'short'])
-        if attack_range == 'short':
-            hull = random.choice(ArmadaTypes.hull_zones)
-        else:
-            hull = 'front'
-        eval_attacks = eval_attacks + a_vs_b(
-            ship_a = ship_a, ship_b = ship_b, agent_a = randagent, agent_b = randagent,
-            ship_a_hull = hull, trials = 1, attack_range = attack_range)
+    for p in range(eval_threads):
+        eval_attacks += queues[p].get()
+        processes[p].join()
 
-    # Run 2000 trials at each range to create training data for lifetime prediction.
+    # Make this parallel so that more samples can be quickly generated
+    processes = []
+    queues = []
+    # Run a lot of trials at each range to create training data for lifetime prediction.
+    train_threads = 20
+    for _ in range(train_threads):
+        queues.append(multiprocessing.Queue())
+        processes.append(multiprocessing.Process(
+            target=get_n_examples, args=(200, ship_a, ship_b, randagent, queues[-1])))
+        processes[-1].start()
     attacks = []
-    for _ in range(2000):
-        # At short range all hull zones can attack, otherwise only the front zone can attack.
-        attack_range = random.choice(['long', 'medium', 'short', 'short', 'short', 'short'])
-        if attack_range == 'short':
-            hull = random.choice(ArmadaTypes.hull_zones)
-        else:
-            hull = 'front'
-        attacks = attacks + a_vs_b(
-            ship_a = ship_a, ship_b = ship_b, agent_a = randagent, agent_b = randagent,
-            ship_a_hull = hull, trials = 1, attack_range = attack_range)
+    for p in range(train_threads):
+        attacks += queues[p].get()
+        processes[p].join()
 
     return attacks, eval_attacks
 
@@ -254,6 +297,7 @@ def resolve_attack_effects_model(create_training_dataset):
     # If the network is too large it has a tendency to start fitting to specific cases.
     # Batchnorm doesn't seem to help out much with this network and task.
     network = torch.nn.Sequential(
+        torch.nn.BatchNorm1d(input_size),
         torch.nn.Linear(input_size, 2 * input_size),
         torch.nn.ELU(),
         torch.nn.Linear(2 * input_size, 4 * input_size),
@@ -320,13 +364,14 @@ def spend_defense_tokens_model(create_training_dataset):
     phase_name = "attack - spend defense tokens"
     input_size = Encodings.calculateActionSize(phase_name) + Encodings.calculateWorldStateSize()
     network = torch.nn.Sequential(
+        torch.nn.BatchNorm1d(input_size),
         torch.nn.Linear(input_size, 2 * input_size),
         torch.nn.ELU(),
         torch.nn.Linear(2 * input_size, 4 * input_size),
         torch.nn.ELU(),
-        torch.nn.Linear(4 * input_size, input_size),
+        torch.nn.Linear(4 * input_size, 2 * input_size),
         torch.nn.ELU(),
-        torch.nn.Linear(input_size, 1))
+        torch.nn.Linear(2 * input_size, 1))
     network.to(target_device)
     optimizer = torch.optim.Adam(network.parameters(), lr=0.0005)
     batch_size = 32
@@ -355,12 +400,13 @@ def spend_defense_tokens_model(create_training_dataset):
     batch = torch.Tensor(batch_size, input_size).to(target_device)
     labels = torch.Tensor(batch_size, 1).to(target_device)
 
-    for num_samples in collect_attack_batches(batch, labels, attacks, phase_name):
-        errors.append(update_lifetime_network(network, batch[:num_samples],
-                                              labels[:num_samples], optimizer))
-        # Evaluate every epoch
-        eval_errors.append(update_lifetime_network(network, eval_batch,
-                                                   eval_labels, None, True))
+    for epoch in range(20):
+        for num_samples in collect_attack_batches(batch, labels, attacks, phase_name):
+            errors.append(update_lifetime_network(network, batch[:num_samples],
+                                                  labels[:num_samples], optimizer))
+            # Evaluate every epoch
+            eval_errors.append(update_lifetime_network(network, eval_batch,
+                                                       eval_labels, None, True))
 
     return network, errors, eval_errors
 
@@ -370,7 +416,8 @@ def test_resolve_attack_effects_model(resolve_attack_effects_model):
 
     Test lifetime predictions during the resolve attack effects phase.
     """
-    a_network, errors, eval_errors = resolve_attack_effects_model
+    network, errors, eval_errors = resolve_attack_effects_model
+    network.eval()
     phase_name = "attack - resolve attack effects"
     input_size = Encodings.calculateActionSize(phase_name) + Encodings.calculateWorldStateSize()
 
@@ -427,7 +474,7 @@ def test_resolve_attack_effects_model(resolve_attack_effects_model):
     batch[3] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
-    lifetime_out = a_network(batch[:4])
+    lifetime_out = network(batch[:4])
 
     # The lifetimes should go up sequentially with the above scenarios
     #print("Lifetimes from A are {}".format(lifetime_out))
@@ -441,13 +488,79 @@ def test_defense_tokens_model(spend_defense_tokens_model):
     Test lifetime predictions during the spend defense tokens phase.
     """
     network, errors, eval_errors = spend_defense_tokens_model
+    network.eval()
+    phase_name = "attack - spend defense tokens"
+    input_size = Encodings.calculateActionSize(phase_name) + Encodings.calculateWorldStateSize()
 
-    # TODO FIXME Add some "common sense" tests
+    target_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    batch_size = 32
+    batch = torch.Tensor(batch_size, input_size).to(target_device)
 
-    print("First and last errors in b are {} and {}".format(errors[0], errors[-1]))
-    print("All errors in b are {}".format(errors))
+    print("First and last errors in b are {} and {}".format(eval_errors[0], eval_errors[-1]))
+    #print("All errors in b are {}".format(eval_errors))
 
     assert eval_errors[0] > eval_errors[-1]
+
+    # Let's examine predictions for different dice pools and spent defense tokens.
+    # Go through the following scenarios:
+    # 1.1 An attack with more than enough damage to destroy the ship
+    # 1.2 The same attack but a brace that would prevent destruction
+    # 1.3 The same attack but an redirect that would prevent destruction
+    # Result: 1.1 should have lower lifetime than 1.2 and 1.3
+    # 2.1 An attack that can barely destroy the ship
+    # 2.2 An attack that barely will not destroy the ship
+    # Result: 2.1 should have lower lifetime than 2.2.
+    # Ideally 1.1 and 2.1 would have 0 lifetimes.
+    world_state = WorldState()
+    ship_a = ship.Ship(name="Ship A", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=1)
+    ship_b = ship.Ship(name="Ship B", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
+    world_state.addShip(ship_a, 0)
+    world_state.addShip(ship_b, 1)
+    pool_colors, pool_faces = ['black'] * 4, ['hit_crit'] * 4
+    world_state.setSubPhase(phase_name)
+    ship_b.shields['front'] = 2
+    ship_b._hull = 3
+    attack = AttackState('short', ship_a, 'left', ship_b, 'front', pool_colors, pool_faces)
+    world_state.updateAttack(attack)
+    action_encoding = Encodings.encodeAction(world_state.sub_phase, None)
+    state_encoding, token_slots, die_slots = Encodings.encodeAttackState(world_state)
+    batch[0] = torch.cat(
+        (action_encoding.to(target_device), state_encoding.to(target_device)))
+
+    brace_index = ship_b.defense_tokens.index("green brace")
+    action = ("brace", (brace_index, None))
+    world_state.attack.defender_spend_token(brace_index)
+    action_encoding = Encodings.encodeAction(world_state.sub_phase, action)
+    state_encoding, token_slots, die_slots = Encodings.encodeAttackState(world_state)
+    batch[1] = torch.cat(
+        (action_encoding.to(target_device), state_encoding.to(target_device)))
+
+    world_state = WorldState()
+    ship_a = ship.Ship(name="Ship A", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=1)
+    ship_b = ship.Ship(name="Ship B", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
+    world_state.addShip(ship_a, 0)
+    world_state.addShip(ship_b, 1)
+    pool_colors, pool_faces = ['black'] * 4, ['hit_crit'] * 2 + ['hit'] * 2
+    world_state.setSubPhase(phase_name)
+    ship_b.shields['front'] = 2
+    ship_b._hull = 3
+    attack = AttackState('short', ship_a, 'left', ship_b, 'front', pool_colors, pool_faces)
+    world_state.updateAttack(attack)
+
+    redirect_index = ship_b.defense_tokens.index("green redirect")
+    action = ("redirect", (redirect_index, [('left', 4)]))
+    world_state.attack.defender_spend_token(redirect_index)
+    action_encoding = Encodings.encodeAction(world_state.sub_phase, action)
+    state_encoding, token_slots, die_slots = Encodings.encodeAttackState(world_state)
+    batch[2] = torch.cat(
+        (action_encoding.to(target_device), state_encoding.to(target_device)))
+
+    lifetime_out = network(batch[:3])
+    print("super cool lifetimes are {}".format(lifetime_out[:3]))
+
+    # Using no defense token results in destruction, lifetime should be less
+    assert(lifetime_out[0].item() < lifetime_out[1].item())
+    assert(lifetime_out[0].item() < lifetime_out[2].item())
 
 
 def test_policy_network(resolve_attack_effects_model, spend_defense_tokens_model):

@@ -327,7 +327,7 @@ def test_roll_encodings():
                 assert "none" != die_color
 
                 die_face = "none"
-                for offset, face in enumerate(ArmadaDice.die_faces):
+                for offset, face in enumerate(ArmadaDice.die_faces_frequencies):
                     if 1.0 == dice_section[len(ArmadaDice.die_colors) + offset]:
                         die_face = face
                 assert "none" != die_face

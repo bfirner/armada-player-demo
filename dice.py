@@ -9,12 +9,13 @@ class ArmadaDice:
     blank={ "red": 2, "blue": 0, "black": 2 }
 
     die_colors = ["red", "blue", "black"]
-    die_faces = { "hit": hit,
-                  "crit": crit,
-                  "accuracy": accuracy,
-                  "hit_hit": hit_hit,
-                  "hit_crit": hit_crit,
-                  "blank": blank}
+    die_faces = ["hit", "crit", "accuracy", "hit_hit", "hit_crit", "blank"]
+    die_faces_frequencies = { "hit": hit,
+                               "crit": crit,
+                               "accuracy": accuracy,
+                               "hit_hit": hit_hit,
+                               "hit_crit": hit_crit,
+                               "blank": blank}
 
     face_to_damage = { "hit": 1,
                        "crit": 1,
@@ -26,7 +27,7 @@ class ArmadaDice:
     @staticmethod
     def random_roll(color):
         rand_roll = random.uniform(0, 8)
-        for face, counts in ArmadaDice.die_faces.items():
+        for face, counts in ArmadaDice.die_faces_frequencies.items():
             if rand_roll <= counts[color]:
                 return face
             else:

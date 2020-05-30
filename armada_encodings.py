@@ -1,5 +1,5 @@
 #
-# Copyright Bernhard Firner, 2019
+# Copyright Bernhard Firner, 2019-2020
 #
 # Encodings of the world state used with neural network models.
 # 
@@ -66,21 +66,18 @@ class Encodings():
         # Hot encoding the defenders tokens
         # Each hot encoding is: [type - 5, color - 2, spent - 1]
         token_slots = random.sample(range(ArmadaTypes.max_defense_tokens), len(ship.defense_tokens))
-        for token_idx, slot in enumerate(token_slots):
+        for token_idx, token in enumerate(ship.defense_tokens):
+            slot = token_slots[token_idx]
             slot_offset = cur_offset + slot * Encodings.hot_token_size
-            # Process if the ship has a token for this slot
-            if token_idx < len(ship.defense_tokens):
-                token = ship.defense_tokens[token_idx]
-                # Encode the token type
-                for offset, ttype in enumerate(ArmadaTypes.defense_tokens):
-                    encoding[slot_offset + offset] = 1 if ttype in token else 0
-                slot_offset = slot_offset + len(ArmadaTypes.defense_tokens)
-                # Encode the token color
-                for offset, color in enumerate(ArmadaTypes.token_colors):
-                    encoding[slot_offset + offset] = 1 if color == token[0:len(color)] else 0
-                slot_offset = slot_offset + len(ArmadaTypes.token_colors)
-                # Encode if this particular token has been spent
-                encoding[slot_offset] = 1 if ship.spent_tokens[token_idx] else 0
+            tcolor, ttype = tuple(token.split(' '))
+            # Encode the token type
+            encoding[slot_offset + ArmadaTypes.defense_tokens.index(ttype)] = 1
+            slot_offset = slot_offset + len(ArmadaTypes.defense_tokens)
+            # Encode the token color
+            encoding[slot_offset + ArmadaTypes.token_colors.index(tcolor)] = 1
+            slot_offset = slot_offset + len(ArmadaTypes.token_colors)
+            # Encode if this particular token has been spent
+            encoding[slot_offset] = 1 if ship.spent_tokens[token_idx] else 0
 
         # Move the current encoding offset to the position after the token section
         cur_offset += Encodings.hot_token_size * ArmadaTypes.max_defense_tokens
@@ -196,10 +193,10 @@ class Encodings():
         cur_offset += Encodings.encodeShip(attacker, attack, encoding[cur_offset:])[0]
 
         # Encode whether an accuracy has been spent on the defender tokens
-        for token_idx, slot in enumerate(token_slots):
+        for token_idx, token in enumerate(defender.defense_tokens):
+            slot = token_slots[token_idx]
             slot_offset = cur_offset + slot
-            if token_idx < len(defender.defense_tokens):
-                encoding[slot_offset] = 1 if attack.accuracy_tokens[token_idx] else 0
+            encoding[slot_offset] = 1 if attack.accuracy_tokens[token_idx] else 0
         cur_offset += ArmadaTypes.max_defense_tokens
 
         # Attack range
@@ -216,12 +213,12 @@ class Encodings():
         for die_idx, slot in enumerate(die_slots):
             slot_offset = cur_offset + slot * Encodings.hot_die_size
             # Encode die colors
-            for offset, color in enumerate(ArmadaDice.die_colors):
-                encoding[slot_offset + offset] = 1 if color == attack.pool_colors[die_idx] else 0
+            color = attack.pool_colors[die_idx]
+            encoding[slot_offset + ArmadaDice.die_colors.index(color)] = 1
             slot_offset += len(ArmadaDice.die_colors)
             # Encode die faces
-            for offset, face in enumerate([face for face in ArmadaDice.die_faces.keys()]):
-                encoding[slot_offset + offset] = 1 if face == attack.pool_faces[die_idx] else 0
+            face = attack.pool_faces[die_idx]
+            encoding[slot_offset + ArmadaDice.die_faces.index(face)] = 1
 
         # Sanity check on the encoding size and the data put into it
         assert encoding.size(0) == cur_offset + Encodings.hot_die_size * Encodings.max_die_slots
@@ -321,7 +318,7 @@ class Encodings():
             # Each die could be an accuracy and could target any of the defender's tokens.
 
             # Simple case when there was no action taken.
-            if None == action_tuple:
+            if action_tuple is None or action_tuple[0] is None:
                 return encoding
             action = action_tuple[0]
             if "accuracy" == action:
@@ -343,7 +340,7 @@ class Encodings():
             # TODO Just covering tokens for now.
 
             # Simple case when there was no action taken.
-            if None == action_tuple[0]:
+            if action_tuple is None or action_tuple[0] is None:
                 return encoding
 
             # Offsets used during encodings

@@ -26,6 +26,11 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
     world_state.setPhase("ship phase", "attack - roll atack dice")
 
     # TODO Effects that occur before the roll should happen here (obstruction, Sato, etc)
+    # TODO FIXME Cloning the world state during logging is extremely slow. It would be better to
+    # simply encode the world state here directly, but then users of the log need easy ways to
+    # extract information from the encoding. The world state object itself should be modified to
+    # make it easier to serialize and deserialize itself, or query from a serialized version of
+    # itself.
 
     attack_ship, attack_hull = attacker[0], attacker[1]
     pool_colors, pool_faces = attack_ship.roll(attack_hull, attack_range)
