@@ -12,6 +12,8 @@
 class ArmadaDimensions:
     # Ship sizes in mm (from the Armada FAQ) in (width, height) tuples
     # TODO Should differentiate between plastic and cardboard dimensions
+    # TODO Add huge ship
+    size_names = ['small', 'medium', 'large', 'huge']
     ship_bases = {
         "small": (42,71),
         "medium": (63,102),
@@ -24,9 +26,10 @@ class ArmadaTypes:
     defense_tokens = ["evade", "brace", "scatter", "contain", "redirect", "salvo"]
     token_colors = ["green", "red"]
     max_defense_tokens = 6
+    max_command_dials = 6
     ranges = ["short", "medium", "long"]
     # TODO Expand this for huge ships
-    hull_zones = ["left", "right", "front", "rear"]
+    hull_zones = ["left", "right", "front", "rear", "left-auxiliary", "right-auxiliary"]
     adjacent_hull_zones = {
         "left": ("front", "rear"),
         "right": ("front", "rear"),

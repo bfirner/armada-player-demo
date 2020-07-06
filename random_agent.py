@@ -1,11 +1,12 @@
 #
 # Copyright Bernhard Firner, 2020
 #
+import torch
 import ship
 from dice import ArmadaDice
 from base_agent import BaseAgent 
 from game_constants import (ArmadaPhases, ArmadaTypes)
-from utility import (token_index, greenest_token_index, greenest_token, max_damage_index, face_index)
+from utility import (max_damage_index, face_index)
 
 import random
 
@@ -43,7 +44,6 @@ class RandomAgent(BaseAgent):
         defender = attack.defender
         pool_colors = attack.pool_colors
         pool_faces = attack.pool_faces
-        spent_tokens = attack.defender.spent_tokens
 
         # Currently we aren't checking for any game modifiers from cards or objectives so the only
         # possible choices from the agent during the resolve attack effects phase are to spend
@@ -54,21 +54,45 @@ class RandomAgent(BaseAgent):
         if 0 == len(accuracies):
             return None
         # Keep track of which tokens are locked with accuracies
-        targets = []
+        gidx, glen = defender.get_index('green_defense_tokens')
+        ridx, rlen = defender.get_index('red_defense_tokens')
+        green_tokens = defender.encoding[gidx:gidx + glen]
+        red_tokens = defender.encoding[ridx:ridx + rlen]
+        with torch.no_grad():
+            total_tokens = int(green_tokens.sum().item() + red_tokens.sum().item())
+        # Make a counter to make the random selection process simpler
+        # Begin with a placeholder 0 here to simplify the loops
+        cumulative_tokens = [0]
+        for i in range(green_tokens.size(0)):
+            cumulative_tokens.append(cumulative_tokens[-1] + green_tokens[i].item())
+        for i in range(red_tokens.size(0)):
+            cumulative_tokens.append(cumulative_tokens[-1] + red_tokens[i].item())
+        # Chop off the placeholder 0
+        cumulative_tokens = cumulative_tokens[1:]
         # Don't attempt to accuracy more things that what exists.
-        if len(accuracies) > len(attack.defender.defense_tokens):
-            accuracies = accuracies[:len(attack.defender.defense_tokens)]
-        for acc in accuracies:
-            # Randomly choose to use the accuracy or not. It is okay if this is a bit biased towards
-            # using the accuracy so we will just choose randomly one of the existing tokens or no
-            # token.
-            target = random.randint(0, len(attack.defender.defense_tokens) - len(targets))
-            if target < (len(attack.defender.defense_tokens) - len(targets)):
-                # Avoid targetting the same die more than once. It is cancelled by the accuracy so it is
-                # not possible to target multiple times.
-                while 0 < len([t for t in targets if t[1] == target]):
-                    target += 1
-                targets.append((acc, target))
+        num_acc_to_use = random.randint(0, min(len(accuracies), total_tokens))
+        # Shuffle the correct number of accuracies with 0s for non accuracied tokens
+        selection = [1] * num_acc_to_use + [0] * (total_tokens - num_acc_to_use)
+        random.shuffle(selection)
+        # Loop through the tokens and assign the accuracies to the correct token types.
+        targets = []
+        acc_idx = 0
+        for acc, select in enumerate(selection):
+            if 1 == select:
+                # Grab the token section that contains this index
+                token_idx = next(i for i in range(glen + rlen) if cumulative_tokens[i] > acc)
+                if token_idx < glen:
+                    # Still in the green token section
+                    targets.append((acc_idx,
+                                    token_idx,
+                                    ArmadaTypes.token_colors.index("green")))
+                    acc_idx += 1
+                else:
+                    # Targetting a red token
+                    targets.append((acc_idx,
+                                    token_idx - glen,
+                                    ArmadaTypes.token_colors.index("red")))
+                    acc_idx += 1
         if 0 < len(targets):
             return ("accuracy", targets)
         else:
@@ -95,7 +119,6 @@ class RandomAgent(BaseAgent):
         defender = attack.defender
         pool_colors = attack.pool_colors
         pool_faces = attack.pool_faces
-        spent_tokens = attack.defender.spent_tokens
         accuracy_tokens = attack.accuracy_tokens
 
         # Very random agent. We will just go through a few random actions but won't do anything
@@ -108,16 +131,28 @@ class RandomAgent(BaseAgent):
         # Let's skip spending more tokens if we have already decided to scatter though or if there
         # are no dice in the pool.
         if attack.token_type_spent('scatter') or 0 == len(attack.pool_faces):
-            return (None, None)
+            return []
 
         # Randomly pick tokens to use from the token types available that have not been targetted
         # with an accuracy.
-        for tindx in range(len(defender.defense_tokens)):
-            ttype = defender.token_type(tindx)
-            if (not defender.spent_tokens[tindx] and not accuracy_tokens[tindx] and
+        # TODO FIXME Accuracy tokens change to selecting token types rather than specific tokens
+        # TODO FIXME The index being returned only refers to spending green (0) or red (1)
+        actions = []
+        for tindx, ttype in enumerate(ArmadaTypes.defense_tokens):
+            green_present, red_present = world_state.attack.defender.token_count(tindx)
+            # Here we are going to assume that rules prevent anyone from using an accuracy on an
+            # already spent token.
+            total_green = green_present - attack.accuracy_tokens[tindx]
+            total_red = red_present - attack.accuracy_tokens[tindx + len(ArmadaTypes.defense_tokens)]
+            # Maybe spend this token if one is available and hasn't been spent by the defender
+            if (0 < total_green + total_red and
                 not attack.token_type_spent(ttype) and 0 == random.randint(0, 1)):
+                # Choose which type of token to spend (red or green)
+                spend_type = 0
+                if total_green < random.randint(1, total_red + total_green):
+                    spend_type = 1
                 if ttype in ["brace", "scatter", "contain", "salvo"]:
-                    return (ttype, (tindx, None))
+                    actions.append((ttype, (spend_type, None)))
                 else:
                     # Provide targets for the token
                     if 'evade' == ttype and attack.range != 'short':
@@ -133,21 +168,18 @@ class RandomAgent(BaseAgent):
                             dice2 = random.randint(0, len(attack.pool_faces) - 2)
                             if dice2 == dice:
                                 dice2 = len(attack.pool_faces) - 1
-                            return (ttype, (tindx, dice, dice2))
+                            actions.append((ttype, (spend_type, dice, dice2)))
                         else:
-                            return (ttype, (tindx, dice))
+                            actions.append((ttype, (spend_type, dice)))
                     elif 'redirect' == ttype:
                         # Choose an adjacent hull zone to suffer damage and redirect a random
                         # amount.
                         # Select an adjacent hull zone to the current one.
                         hull = defender.adjacent_zones(attack.defending_hull)[random.randint(0, 1)]
                         # Redirection must also specify the amount of damage to send to
-                        # each hull zone so return (ttype, (tindx, (hull, damage)))
+                        # each hull zone so return (ttype, (spend_type, (hull, damage)))
                         damage = random.randint(0, ArmadaDice.pool_damage(pool_faces))
-                        return (ttype, (tindx, [(hull, damage)]))
+                        actions.append((ttype, (spend_type, [(hull, damage)])))
                         # TODO Advanced projectors or the foresight title allow redirection to
                         # multiple hull zones.
-
-        # If no token was selected then return no action.
-        return (None, None)
-
+        return actions

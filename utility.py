@@ -1,6 +1,7 @@
 # Utility functions.
 
 import csv
+from game_constants import (ArmadaTypes)
 
 # Array of matching token indexes
 def token_index(token, defender):
@@ -17,29 +18,28 @@ def adjacent_hulls(hull_zone):
         raise Exception("Unknown hull zone given to adjacent_hulls function.")
     return adjacent_map[hull_zone]
 
-# Array of matching token indexes with greenest tokens first
-def greenest_token_index(token, defender):
-    greens = []
-    reds = []
-    for idx, name in enumerate(defender.defense_tokens):
-        if "green {}".format(token) == name:
-            greens.append(idx)
-        elif "red {}".format(token) == name:
-            reds.append(idx)
-    return greens + reds
+def tokens_available(token, defender, accuracy_tokens = None):
+    """Return a tuple indicating if a red or green token is available.
 
-def greenest_token(name, defender, accuracy_tokens):
-    """Return the index of the first, greenest token of the given type that can be spent.
-
-    TODO Need to also return a token that has not been spent
-    
+    Arguments:
+        token (str)   : The token types (one of ArmadaTypes.defense_tokens) 
+        defender(Ship): The defending ship whose tokens to check.
+    Returns:
+        tuple(bool, bool): True if a green or red token is available, respectively.
     """
-    green_tokens = [idx for idx in token_index('green {}'.format(name), defender) if not accuracy_tokens[idx]]
-    red_tokens = [idx for idx in token_index('red {}'.format(name), defender) if not accuracy_tokens[idx]]
-    if green_tokens or red_tokens:
-        return green_tokens[0] if green_tokens else red_tokens[0]
-    else:
-        return None
+    green = False
+    red = False
+    token_offset = ArmadaTypes.defense_tokens.index(token)
+    green_offset, green_size = defender.get_index("green_defense_tokens")
+    red_offset, red_size = defender.get_index("red_defense_tokens")
+    green_offset += token_offset
+    red_offset += token_offset
+    green_sum = defender.encoding[green_offset].item()
+    red_sum = defender.encoding[green_offset].item()
+    if accuracy_tokens:
+        green_sum = max(0., green_sum - accuracy_tokens[token_offset])
+        red_sum -= max(0., red_sum - accuracy_tokens[token_offset + len(ArmadaTypes.defense_tokens)])
+    return (green_sum, red_sum)
 
 def max_damage_index(pool_faces):
     for face in ["hit_crit", "hit_hit", "crit", "hit"]:

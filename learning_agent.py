@@ -87,20 +87,21 @@ class LearningAgent(BaseAgent):
                             For redirect tokens the second value is a tuple of (str, int) for the
                             target hull zone and the amount of damage to direct to that hull zone.
         """
+        # TODO FIXME The return type is totally messed up, a list of actions should be allowable
+        # from here
         # We only handle one sub-phase in this function
         assert world_state.sub_phase == "attack - spend defense tokens"
 
         if None == self.model:
             # Return no action
-            return None, None
+            return []
         # Encode the state, forward through the network, decode the result, and return the result.
-        as_enc, token_slots, die_slots = Encodings.encodeAttackState(world_state)
+        as_enc, die_slots = Encodings.encodeAttackState(world_state)
         as_enc = as_enc.to(self.device)
         if not self.model.with_novelty:
             # Forward through the policy net randomly, otherwise return random actions
             if self.randprob >= random.random():
                 # Take a random action
-                # TODO FIXME Here
                 action = self.random_agent("def_tokens", as_enc)[0]
             else:
                 action = self.model.forward("def_tokens", as_enc)[0]
@@ -118,46 +119,60 @@ class LearningAgent(BaseAgent):
         # Don't return the lifetime prediction (used in train_defense_tokens.py)
         #with torch.no_grad():
         #    action = torch.round(action[:Encodings.calculateSpendDefenseTokensSize()])
-        # Determine which token should be spent. Choose the max token or no token.
-        _, token_idx = action[:len(ArmadaTypes.defense_tokens) + 1].max(0)
-        # Return now if no token will be spent
-        if token_idx.item() == len(ArmadaTypes.defense_tokens):
-            return None, None
+        # Determine which tokens should be spent. Spend any above a threshold.
+        with torch.no_grad():
+            spend_green = action[:len(ArmadaTypes.defense_tokens)] > math.log(0.5)
+            spend_red = action[len(ArmadaTypes.defense_tokens):2*len(ArmadaTypes.defense_tokens)] > math.log(0.5)
+            spent_tokens = spend_green + spend_red
+            # Return now if no token will be spent
+            if (0 == spent_tokens).all():
+                return []
 
-        # Check for an invalid response from the agent
-        # TODO Perhaps this should be penalized in some way
-        if len(token_slots) <= token_idx.item():
-            return None, None
+        # Handle the tokens
+        green = ArmadaTypes.token_colors.index('green')
+        red = ArmadaTypes.token_colors.index('red')
 
-        # Check the token in the input encoding.
-        src_token_idx = token_slots[token_idx.item()]
-        # Handle the token
         # First check for validity. If the selected token isn't valid then use no token.
-        if src_token_idx >= len(world_state.attack.defender.defense_tokens):
-            return None, None
+        # TODO Perhaps this should be penalized in some way
+        green_idx, green_len = Ship.get_index('defense_tokens_green')
+        red_idx, red_len = Ship.get_index('defense_tokens_red')
+        defender_green_tokens = world_state.attack.defender.encoding[green_idx:green_idx + green_len]
+        defender_red_tokens = world_state.attack.defender.encoding[red_idx:red_idx + red_len]
+        if (spend_green > defender_green_tokens).any() or (spend_red > defender_red_tokens).any():
+            return []
 
-        # Verify that this token has not be the target of an accuracy and that it can be spent
-        if src_token_idx in world_state.attack.accuracy_tokens:
-            return None, None
+        # Verify that these tokens have not been the target of an accuracy and that they can be
+        # spent
+        for idx in len(ArmadaTypes.defense_tokens):
+            if 0 < world_state.attack.accuracy_tokens[idx] and 0 < spent_tokens[idx]:
+                return []
+        # TODO FIXME Those last two checks (for token availability and non-accuracy status) should
+        # be enforced via a fixed input to the network that suppresses token outputs if they are not
+        # available. This would make learning simpler.
 
-        src_token = world_state.attack.defender.defense_tokens[src_token_idx]
-        tcolor, ttype = tuple(src_token.split(' '))
-
+        actions = []
         # Handle the token, decoding the returned action based upon the token type.
-        if "evade" == ttype:
-            begin = len(ArmadaTypes.defense_tokens) + 1
+        evade_index = ArmadaTypes.defense_tokens.index("evade")
+        if 0 < defender_green_tokens[evade_index].item() + defender_red_tokens[evade_index].item():
+            begin = Encodings.getSpendDefenseTokensEvadeOffset()
             end = begin + Encodings.max_die_slots
+            # Get the index of the maximum die response
             _, die_idx = action[begin:end].max(0)
             # Check for an invalid response from the agent
             # TODO Perhaps this should be penalized in some way
+            # TODO FIXME This should also be supressed through die availability.
+            # TODO FIXME Also handle extreme range with 2 die targets
             if len(die_slots) <= die_idx.item():
-                return None, None
-            src_die_slot = die_slots[die_idx.item()]
-            return src_token_idx, src_die_slot
+                pass
+            else:
+                color = green if 0 < defender_green_tokens[evade_index].item() else red
+                src_die_slot = die_slots[die_idx.item()]
+                actions.append(("evade", (src_die_slot)))
 
         # TODO This only supports redirecting to a single hull zone currently
-        if "redirect" == ttype:
-            begin = len(ArmadaTypes.defense_tokens) + 1 + Encodings.max_die_slots
+        redir_index = ArmadaTypes.defense_tokens.index("redirect")
+        if 0 < spent_tokens[ArmadaTypes.defense_tokens.index("redirect")]:
+            begin = Encodings.getSpendDefenseTokensRedirectOffset()
             end = begin + len(ArmadaTypes.hull_zones)
             # The encoding has a value for each hull zone. We should check if an upgrade allows the
             # defender to redirect to nonadjacent or multiple hull zones, but for now we will just
@@ -174,10 +189,16 @@ class LearningAgent(BaseAgent):
                     redir_hull = hull
                     redir_amount = hull_redir_amount
 
-            # Agent is asking to redirect nothing
-            if None == redir_hull:
-                return None, None
-            return src_token_idx, (redir_hull, redir_amount)
+            # Make sure there is actual redirection
+            if None != redir_hull:
+                color = green if 0 < defender_green_tokens[redir_index].item() else red
+                actions.append(("redirect", (redir_hull, redir_amount)))
 
         # Other defense tokens with no targets
-        return src_token_idx, None
+        for tindx, token_type in enumerate(ArmadaTypes.defense_tokens):
+            if token_type not in ["evade", "redirect"]:
+                if 0 < spent_tokens[tindx]:
+                    color = green if 0 < defender_green_tokens[tindx].item() else red
+                    actions.append((token_type, (color, None)))
+
+        return actions

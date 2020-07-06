@@ -23,65 +23,80 @@ class AttackState:
         self.defending_hull = defending_hull
         self.pool_colors = pool_colors
         self.pool_faces = pool_faces
-        # Keep track of which tokens are spent.
-        self.spent_types = [False] * len(ArmadaTypes.defense_tokens)
+        # Keep track of which tokens are spent and what effects are enabled.
+        self.defense_effects = [0.] * len(ArmadaTypes.defense_tokens)
+        self.spent_types = [0.] * len(ArmadaTypes.defense_tokens)
         # A token targeted with an accuracy cannot be spent.
-        # A list of indices of tokens that were the target of an accuracy.
-        self.accuracy_tokens = [False] * len(defender.defense_tokens)
+        # A count of token types that were the target of an accuracy.
+        # Double because there are both green and red types
+        # TODO FIXME This has changed from ship tokens to token types, fix everywhere it is used
+        self.accuracy_tokens = [0.] * 2 * len(ArmadaTypes.defense_tokens)
 
-    def flip_token(self, ship, index):
-        """
-        Flip a defense token from green to red or discard it if it is red.
-
-        Args:
-            index (int): Index of the token to flip or discard
+    @staticmethod
+    def encode_size():
+        """Get the size of the AttackState encoding.
 
         Returns:
-            bool: True if the token remains, false otherwise
+            int: Size of the encoding (number of Tensor elements)
         """
-        tcolor, ttype = tuple(ship.defense_tokens[index].split(' '))
-        if 'green' == tcolor:
-            ship.defense_tokens[index] = 'red ' + ttype
-            return True
-        else:
-            # Token is red if it is not green, so discard it instead of flipping
-            ship.defense_tokens = ship.defense_tokens[0:index] + ship.defense_tokens[index+1:]
-            ship.spent_tokens = ship.spent_tokens[0:index] + ship.spent_tokens[index+1:]
-            self.accuracy_tokens = self.accuracy_tokens[0:index] + self.accuracy_tokens[index+1:]
-            return False
+        # 1 each for player number, remaining hull, current speed, ship type
+        size = 4
+        # Ship size
+        size += len(ArmadaDimensions.ship_bases)
+        # Encode defense tokens as a number of each kind. Count color as a type as well.
+        size += len(ArmadaTypes.defense_tokens) * len(ArmadaTypes.token_colors)
+        # Shield value for each hull zone
+        size += len(ArmadaTypes.hull_zones)
+        # TODO Upgrades
+        # Command dials
+        size += ArmadaTypes.max_command_dials
+        return size
 
-    def defender_spend_token(self, index):
+    def accuracy_defender_token(self, token_type, color_type):
+        """
+        Spend an accuracy on one of the defener's tokens.
+
+        Args:
+            token_type (int): Token type to spend (see ArmadaTypes.defense_tokens)
+            color_type (int): 0 for green, 1 for red (see ArmadaTypes.token_colors)
+        """
+        offset = token_type
+        offset += color_type * len(ArmadaTypes.defense_tokens)
+        self.accuracy_tokens[offset] += 1.
+
+    # TODO FIXME HERE Update this function with the new arguments
+    def defender_spend_token(self, token_type, color_type):
         """
         Mark a token as spent and change its color or discard it. This token cannot be spent again
         during the attack.
 
         Args:
-            index (int): Index of the token to spend.
-
-        Returns:
-            str: Token type
+            token_type (str): Token type to spend.
+            color_type (int): 0 for green, 1 for red
         """
-        # Flip the token
-        _, ttype = tuple(self.defender.defense_tokens[index].split(' '))
-        if self.flip_token(self.defender, index):
-            # Mark it as spent if it remains
-            self.defender.spent_tokens[index] = True
-        self.spent_types[ArmadaTypes.defense_tokens.index(ttype)] = True
-        return ttype
+        self.defender.spend_token(token_type, color_type)
+        self.spent_types[ArmadaTypes.defense_tokens.index(token_type)] = 1.
+        self.defense_effects[ArmadaTypes.defense_tokens.index(token_type)] = 1
 
-    def attacker_spend_token(self, index):
+    def attacker_spend_token(self, token_type, color_type):
         """
         Mark a token as spent and change its color or discard it.
 
         Args:
-            index (int): Index of the token to spend.
+            token_type (str): Token type to spend.
+            color_type (int): 0 for green, 1 for red
         """
         # Flip the token
-        self.flip_token(self.attacker, index)
+        self.attacker.spend_token(token_type, color_type)
 
     def token_type_spent(self, token_type):
         """Return true if the given token type has been spent in this attack."""
         return self.spent_types[ArmadaTypes.defense_tokens.index(token_type)]
+
+    def leave_spend_defense_tokens(self):
+        """No tokens should be in the spent state outside of this phase."""
+        # This shouldn't need to be run, the attack will stop existing and this goes away
+        #self.spent_types = [0.] * len(ArmadaTypes.defense_tokens)
 
     def __str__(self):
         return str("Attack to {} at range {}: {}".format(self.defender, self.range,
@@ -115,8 +130,7 @@ class WorldState:
         """Modify the sub phase."""
         # Handle leaving the spend defense tokens phase
         if self.sub_phase == "attack - spend defense tokens":
-            for ship in self.ships:
-                ship.leave_spend_defense_tokens()
+            self.attack.leave_spend_defense_tokens()
         self.sub_phase = sub
         self.full_phase = self.main_phase + " - " + sub
 

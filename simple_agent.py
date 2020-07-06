@@ -4,8 +4,8 @@
 import ship
 from dice import ArmadaDice
 from base_agent import BaseAgent 
-from game_constants import ArmadaPhases
-from utility import (token_index, greenest_token_index, greenest_token, max_damage_index, face_index)
+from game_constants import (ArmadaPhases, ArmadaTypes)
+from utility import (token_index, tokens_available, max_damage_index, face_index)
 
 
 class SimpleAgent(BaseAgent):
@@ -17,6 +17,31 @@ class SimpleAgent(BaseAgent):
                 "ship phase - attack - spend defense tokens": self.spendDefenseTokens
         }
         super(SimpleAgent, self).__init__(handler)
+
+    @staticmethod
+    def accuracy_token(accuracies, acc_index, targets, tokens, token_type):
+        """Use accuracy dice on all of the specified tokens.
+
+        Arguments:
+            accuracies   (List[int]): List of die faces with an accuracy icon.
+            acc_index          (int): Current position in the accuracies list.
+            targets    (List[tuple]): Targets to return from the agent to the engine.
+            tokens (tuple(int, int)): Number of green and red tokens of the chosen type.
+            token_type         (int): Index (in ArmadaTypes.defense_tokens) of the token type.
+        Returns:
+            int: The updated acc_index
+        """
+        target_idx = 0
+        while acc_index < len(accuracies) and target_idx < tokens[0]:
+            targets.append((accuracies[acc_index], token_type, ArmadaTypes.token_colors.index('green')))
+            acc_index += 1
+            target_idx += 1
+        target_idx = 0
+        while acc_index < len(accuracies) and target_idx < tokens[1]:
+            targets.append((accuracies[acc_index], token_type, ArmadaTypes.token_colors.index('red')))
+            acc_index += 1
+            target_idx += 1
+        return acc_index
 
     # This agent deals with the "resolve attack effects" step.
     def resolveAttackEffects(self, world_state):
@@ -40,7 +65,7 @@ class SimpleAgent(BaseAgent):
         defender = attack.defender
         pool_colors = attack.pool_colors
         pool_faces = attack.pool_faces
-        spent_tokens = attack.defender.spent_tokens
+        spent_types = world_state.attack.spent_types
 
         # Very simple agent. We will just go through a few simple rules.
 
@@ -53,8 +78,6 @@ class SimpleAgent(BaseAgent):
         accuracies = face_index("accuracy", pool_faces)
         if 0 == len(accuracies):
             return None
-        # Keep track of which accuracy we will spend next
-        acc_index = 0
 
         # Accuracy to maximize damage. This could be nonoptimal in some instances (for example if we
         # target a brace but the damage is more than sufficient to destroy the defender on the defending
@@ -73,18 +96,16 @@ class SimpleAgent(BaseAgent):
         # calculation that follows
         evade_damage = damage - max_damage
 
-        evades = greenest_token_index("evade", defender)
-        braces = greenest_token_index("brace", defender)
-        scatters = greenest_token_index("scatter", defender)
+        evades = tokens_available("evade", defender)
+        braces = tokens_available("brace", defender)
+        scatters = tokens_available("scatter", defender)
         # Skipping redirects and contains
 
         targets = []
         # Always target scatter if they are present.
-        if scatters:
-            for idx in scatters:
-                if acc_index < len(accuracies):
-                    targets.append((accuracies[acc_index], idx))
-                    acc_index += 1
+        acc_index = self.accuracy_token(accuracies=accuracies, acc_index=0, targets=targets,
+                                        tokens=scatters,
+                                        token_type=ArmadaTypes.defense_tokens.index('scatter'))
         # Exit if there is nothing else to spend
         if len(accuracies) == acc_index:
             return ("accuracy", targets)
@@ -94,30 +115,25 @@ class SimpleAgent(BaseAgent):
         # 2) If there are enough accuracies to cover everything else then just cover them
         # 3) Otherwise try to cover the more effective token, either braces first or evades first
         if 'short' == attack.range:
-            for idx in braces:
-                if acc_index < len(accuracies):
-                    targets.append((accuracies[acc_index], idx))
-                    acc_index += 1
-        elif ((braces and not evades) or
-              (len(accuracies) - acc_index >= (len(braces) + len(evades))) or
+            acc_index = self.accuracy_token(accuracies=accuracies, acc_index=acc_index,
+                                            targets=targets, tokens=braces,
+                                            token_type=ArmadaTypes.defense_tokens.index('brace'))
+        elif ((0 < braces[0] + braces[1] and 0 == evades[0] + evades[1]) or
+              (len(accuracies) - acc_index >= (braces[0] + braces[1] + evades[0] + evades[1])) or
               brace_damage < evade_damage):
-            for idx in braces:
-                if acc_index < len(accuracies):
-                    targets.append((accuracies[acc_index], idx))
-                    acc_index += 1
-            for idx in evades:
-                if acc_index < len(accuracies):
-                    targets.append((accuracies[acc_index], idx))
-                    acc_index += 1
+            acc_index = self.accuracy_token(accuracies=accuracies, acc_index=acc_index,
+                                            targets=targets, tokens=braces,
+                                            token_type=ArmadaTypes.defense_tokens.index('brace'))
+            acc_index = self.accuracy_token(accuracies=accuracies, acc_index=acc_index,
+                                            targets=targets, tokens=evades,
+                                            token_type=ArmadaTypes.defense_tokens.index('evade'))
         else:
-            for idx in evades:
-                if acc_index < len(accuracies):
-                    targets.append((accuracies[acc_index], idx))
-                    acc_index += 1
-            for idx in braces:
-                if acc_index < len(accuracies):
-                    targets.append((accuracies[acc_index], idx))
-                    acc_index += 1
+            acc_index = self.accuracy_token(accuracies=accuracies, acc_index=acc_index,
+                                            targets=targets, tokens=evades,
+                                            token_type=ArmadaTypes.defense_tokens.index('evade'))
+            acc_index = self.accuracy_token(accuracies=accuracies, acc_index=acc_index,
+                                            targets=targets, tokens=braces,
+                                            token_type=ArmadaTypes.defense_tokens.index('brace'))
 
         # Return targets
         if 0 < len(targets):
@@ -146,50 +162,56 @@ class SimpleAgent(BaseAgent):
         defender = attack.defender
         pool_colors = attack.pool_colors
         pool_faces = attack.pool_faces
-        spent_tokens = attack.defender.spent_tokens
+        spent_types = world_state.attack.spent_types
         accuracy_tokens = attack.accuracy_tokens
 
         # Very simple agent. We will just go through a few simple rules.
 
         # First, no damage means don't do anything
         if 0 == ArmadaDice.pool_damage(pool_faces):
-            return (None, None)
+            return []
 
         # No need to spend any more tokens if we have already scattered
         if attack.token_type_spent('scatter'):
-            return (None, None)
+            return []
 
         # Scatter has highest priority. Note that it may be smarter to evade an
         # attack with only one damage die so this isn't the smartest agent, but
         # this is just a basic agent so this is okay.
-        scatter = greenest_token("scatter", defender, accuracy_tokens)
-        if None != scatter:
-            return ('scatter', (scatter, None))
+        scatter = tokens_available("scatter", defender, accuracy_tokens)
+        if not attack.token_type_spent('scatter'):
+            for color in range(len(ArmadaTypes.token_colors)):
+                if 0 < scatter[color]:
+                    return [('scatter', (color, None))]
 
-        evade = greenest_token("evade", defender, accuracy_tokens)
-        if not attack.token_type_spent('evade') and None != evade:
+        evade = tokens_available("evade", defender, accuracy_tokens)
+        if not attack.token_type_spent('evade') and 'short' != attack.range:
             # If the range is long we can evade the die with the largest damage.
             # The best action is actually more complicated because removing a die may
             # not be necessary if we will brace and the current damage is an even
             # number. However, it may still be useful in that case to remove a critical
             # face. We will leave handling things like that to a smarter system.
-            if 'short' != attack.range:
-                return ('evade', (evade, max_damage_index(pool_faces)))
-                # If we made it here then there were no dice worth cancelling or rerolling.
+            for color in range(len(ArmadaTypes.token_colors)):
+                if 0 < evade[color]:
+                    return [('evade', (color, max_damage_index(pool_faces)))]
 
         # Brace if damage > 1
-        brace = greenest_token("brace", defender, accuracy_tokens)
-        if not attack.token_type_spent('brace') and None != brace and 1 < ArmadaDice.pool_damage(pool_faces):
-            return ('brace', (brace, None))
+        brace = tokens_available("brace", defender, accuracy_tokens)
+        if not attack.token_type_spent('brace') and 1 < ArmadaDice.pool_damage(pool_faces):
+            for color in range(len(ArmadaTypes.token_colors)):
+                if 0 < brace[color]:
+                    return [('brace', (color, None))]
 
         # Redirect to preserve shields
         # Should really check adjacent shields and figure out what to redirect, but we will leave that
         # to a smarter agent.
-        redirect = greenest_token("redirect", defender, accuracy_tokens)
-        if not attack.token_type_spent('redirect') and None != redirect and 0 < ArmadaDice.pool_damage(pool_faces):
-            # TODO Now handle redirect
-            pass
+        redirect = tokens_available("redirect", defender, accuracy_tokens)
+        if not attack.token_type_spent('redirect') and 0 < ArmadaDice.pool_damage(pool_faces):
+            for color in range(len(ArmadaTypes.token_colors)):
+                if 0 < redirect[color]:
+                    # TODO Now handle redirect
+                    pass
 
         # Return a tuple of two Nones if we won't spend a token.
-        return (None, None)
+        return []
 

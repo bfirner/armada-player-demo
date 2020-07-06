@@ -8,6 +8,7 @@ import torch
 
 import ship
 import utility
+from game_constants import (ArmadaTypes)
 from game_engine import handleAttack
 from random_agent import (RandomAgent)
 from world_state import (WorldState)
@@ -38,7 +39,7 @@ def a_vs_b(ship_a, ship_b, trials, attack_range):
         world_state.addShip(ship_a, 0)
         world_state.addShip(ship_b, 1)
         num_rolls = 0
-        while 0 < ship_b.hull():
+        while ship_b.damage_cards() < ship_b.hull():
             num_rolls += 1
             # Handle the attack and receive the updated world state
             try:
@@ -60,13 +61,13 @@ def test_random_agent():
     ship_b = ship.Ship(name="Ship B", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
 
     # Verify that all of the defense tokens are being used and accuracied.
-    use_counts = torch.zeros(len(ship_b.defense_tokens))
-    accuracy_targets = torch.zeros(len(ship_b.defense_tokens))
+    use_counts = torch.zeros(len(ArmadaTypes.defense_tokens))
+    accuracy_targets = torch.zeros(2 * len(ArmadaTypes.defense_tokens))
 
     # Test with 10 trials at each range to compensate for the natural variability in rolls
     attacks = []
     for attack_range in ['long', 'medium', 'short']:
-        attacks = attacks + a_vs_b(ship_a, ship_b, 10, attack_range)
+        attacks = attacks + a_vs_b(ship_a, ship_b, 100, attack_range)
     # Loop through all attacks and increment the used tokens
     for attack in attacks:
         if 'state' == attack[0] and attack[1].sub_phase == "attack - resolve damage":
@@ -74,8 +75,9 @@ def test_random_agent():
             use_counts += torch.Tensor(attack[1].attack.spent_types)
 
     # We aren't handling the salvo token yet, but check that the others are being spent.
-    for tidx, token in enumerate(ship_b.defense_tokens):
-        assert 0 < use_counts[tidx]
+    for tidx, token in enumerate(ArmadaTypes.defense_tokens):
+        if 'salvo' != ArmadaTypes.defense_tokens[tidx]:
+            assert 0 < use_counts[tidx].item()
 
     # Check accuracy usage
     for attack in attacks:
@@ -85,5 +87,7 @@ def test_random_agent():
             accuracy_targets[:tokens_left] += torch.Tensor(attack[1].attack.accuracy_tokens)
 
     # Check that accuracies are used against any of the tokens.
-    for tidx, token in enumerate(ship_b.defense_tokens):
-        assert 0 < accuracy_targets[tidx]
+    print("accuracy targets are {}".format(accuracy_targets))
+    for tidx, token in enumerate(ArmadaTypes.defense_tokens):
+        if 'salvo' != ArmadaTypes.defense_tokens[tidx]:
+            assert 0 < accuracy_targets[tidx]

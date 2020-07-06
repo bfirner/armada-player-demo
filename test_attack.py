@@ -34,7 +34,7 @@ def a_vs_b(ship_a, ship_b, trials, attack_range):
         world_state.addShip(ship_a, 0)
         world_state.addShip(ship_b, 1)
         num_rolls = 0
-        while 0 < ship_b.hull():
+        while ship_b.damage_cards() < ship_b.hull():
             num_rolls += 1
             # Handle the attack and receive the updated world state
             world_state = handleAttack(world_state=world_state, attacker=(ship_a, "front"),

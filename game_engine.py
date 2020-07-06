@@ -23,7 +23,12 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
     Returns:
         world_state (table) : The world state after the attack completes.
     """
-    world_state.setPhase("ship phase", "attack - roll atack dice")
+    world_state.setPhase("ship phase", "attack - declare")
+    # Log if the log is present
+    if state_log is not None:
+        state_log.append(('state', world_state.clone()))
+
+    world_state.setPhase("ship phase", "attack - roll attack dice")
 
     # TODO Effects that occur before the roll should happen here (obstruction, Sato, etc)
     # TODO FIXME Cloning the world state during logging is extremely slow. It would be better to
@@ -41,8 +46,8 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
     if state_log is not None:
         state_log.append(('state', world_state.clone()))
 
-    spent_tokens = world_state.attack.defender.spent_tokens
     spent_types = world_state.attack.spent_types
+    defense_effects = world_state.attack.defense_effects
     acc_tokens = world_state.attack.accuracy_tokens
     redirect_hull = None
     redirect_amount = None
@@ -87,21 +92,19 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
         if "accuracy" == action:
             spent_dice = []
             for acc_action in attack_effect_tuple[1]:
-                die_index, token_index = acc_action[0], acc_action[1]
+                die_index, token_type, token_color = acc_action[0], acc_action[1], acc_action[2]
                 # Mark this die as spent, it will be removed from the pool after we handle operations
                 # that require the indexes to stay the same
                 spent_dice.append(die_index)
-                # A token targeted with an accuracy cannot be spent normally
-                acc_tokens[token_index] = True
+                # A token type targeted with an accuracy cannot be spent normally
+                attack.accuracy_defender_token(token_type, token_color)
             # Remove the spent dice
             for index in sorted(spent_dice, reverse=True):
                 del pool_faces[index]
                 del pool_colors[index]
         # TODO Handle more effects at some point
         # Get the next attack effect
-        # TODO The design here should be more clear, and maybe the
-        # world state should be modified through an interface instead of through modifying internal
-        # variables. Maybe we should recreate the attack stack if there is internal logging.
+        # TODO Maybe we should recreate the attack stack if there is internal logging.
         #attack = AttackState(attack_range, attacker[0], attacker[1], defender[0], defender[1], pool_colors, pool_faces)
         #attack.accuracy_tokens = acc_tokens
         #attack.spent_types = spent_types
@@ -122,21 +125,21 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
 
     # The defense agent returns: ("effect name", (args...))
     # For a standard defense token the first argument is the token index.
-    effect, effect_args = defensive_agent.handle(world_state)
-    # Log if the log is present
-    if state_log is not None:
-        state_log.append(('action', (effect, effect_args)))
-    while None != effect:
-        # TODO Only handling basic token effects for now
-        if effect in ArmadaTypes.defense_tokens:
-            token = effect_args[0]
-            if token < len(defender[0].defense_tokens):
+    effect_list = defensive_agent.handle(world_state)
+    while 0 != len(effect_list):
+        # Log if the log is present
+        if state_log is not None:
+            state_log.append(('action', effect_list))
+        for effect, effect_args in effect_list:
+            # TODO Only handling basic token effects for now
+            if effect in ArmadaTypes.defense_tokens:
+                token_type = effect
+                color_type = effect_args[0]
                 # Spend the token and resolve the effect
-                token_type = world_state.attack.defender.token_type(token)
                 # If a token has already been spent it cannot be spent again, we should enforce that here.
                 if attack.token_type_spent(token_type):
                     raise RuntimeError("Cannot spend the same token twice during the spend defense tokens sub phase!")
-                world_state.attack.defender_spend_token(token)
+                world_state.attack.defender_spend_token(token_type, color_type)
                 # Only redirect and evade have additional targets
                 if "redirect" == token_type:
                     redirects = effect_args[1]
@@ -155,30 +158,31 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
                                 pool_faces[die_index] = ArmadaDice.random_roll(pool_colors[die_index])
                             world_state.attack.pool_colors = pool_colors
                             world_state.attack.pool_faces = pool_faces
-        else:
-            raise RuntimeError("Effect {} is currently not handled.".format(effect))
-        # Log if the log is present
-        if state_log is not None:
-            state_log.append(('state', world_state.clone()))
+            else:
+                raise RuntimeError("Effect {} is currently not handled.".format(effect))
+            # Log the updated state if the log is present
+            if state_log is not None:
+                state_log.append(('state', world_state.clone()))
         # See if the agent will trigger another effect.
-        effect, effect_args = defensive_agent.handle(world_state)
-        # Log if the log is present
-        if state_log is not None:
-            state_log.append(('action', (effect, effect_args)))
+        effect_list = defensive_agent.handle(world_state)
+    # Log once no action is taken (the current state is associated with no action)
+    if state_log is not None:
+        state_log.append(('action', effect_list))
 
     # TODO The defender may have ways of modifying the attack pool at this point
 
     # Now calculate the damage done to the defender
     # Apply effect on the entire attack at this point
     damage = ArmadaDice.pool_damage(pool_faces)
-    if spent_types[ArmadaTypes.defense_tokens.index('scatter')]:
+    if defense_effects[ArmadaTypes.defense_tokens.index('scatter')]:
         damage = 0
 
-    if spent_types[ArmadaTypes.defense_tokens.index('brace')]:
+    if defense_effects[ArmadaTypes.defense_tokens.index('brace')]:
         damage = damage // 2 + damage % 2
 
-    hull_damage = 0
-    if spent_types[ArmadaTypes.defense_tokens.index('redirect')]:
+    world_state.setSubPhase("attack - resolve damage")
+    damage_cards = 0
+    if defense_effects[ArmadaTypes.defense_tokens.index('redirect')]:
         # Redirect to the target hull zone(s), but don't redirect more damage than is present
         for redirect_hull, redirect_amount in redirects:
             redirect_amount = min(damage, redirect_amount)
@@ -187,20 +191,17 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
             # This would be a weird thing to do, but technically you could redirect damage to the
             # hull if you want shields on the defending hull zone for some reason (or because you
             # are a random agent or dumb network doing something dumb).
-            hull_damage += defender[0].shield_damage(redirect_hull, redirect_amount)
+            damage_cards += defender[0].shield_damage(redirect_hull, redirect_amount)
             # Reduce the damage left
             damage = damage - redirect_amount
 
-    world_state.setSubPhase("attack - resolve damage")
-
     # Deal remaining damage to the shield in the defending hull zone
-    hull_damage += defender[0].shield_damage(defender[1], damage)
+    damage_cards += defender[0].shield_damage(attack.defending_hull, damage)
+    # TODO FIXME Handle criticals and the contain token
+    defender[0].damage(attack.defending_hull, damage_cards)
     # TODO FIXME HERE Logging
     #world_state.attack['{} damage'.format(defender[1])] = damage
 
-    # TODO FIXME Handle criticals and the contain token
-    # Deal hull damage
-    defender[0].damage('hull', hull_damage)
 
     # Log the final attack state if the log is present
     if state_log is not None:

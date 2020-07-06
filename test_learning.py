@@ -11,7 +11,7 @@
 # >>> p.print_stats(50)
 # Or just call snakeviz on the prof file.
 
-import multiprocessing
+import torch.multiprocessing as multiprocessing
 import numpy
 import pytest
 import random
@@ -22,7 +22,7 @@ import utility
 from armada_encodings import (Encodings)
 from game_constants import (ArmadaTypes)
 from game_engine import handleAttack
-from learning_agent import (LearningAgent)
+from random_action_dataset import (RandomActionDataset)
 from random_agent import (RandomAgent)
 from world_state import (AttackState, WorldState)
 
@@ -30,50 +30,6 @@ from world_state import (AttackState, WorldState)
 keys, ship_templates = utility.parseShips('data/test_ships.csv')
 
 # Test the defense tokens by comparing the results of the test ships with and without those tokens
-
-def a_vs_b(ship_a, ship_b, agent_a, agent_b, ship_a_hull, trials, attack_range):
-    """This function runs multiple trials of ship_a firing upon ship_b.
-
-    Args:
-        ship_a ((Ship, str)): Attacker and hull zone tuple.
-        ship_b ((Ship, str)): Defender and hull zone tuple.
-        agent_a  (BaseAgent): Agent to control the actions of ship a.
-        agent_b  (BaseAgent): Agent to control the actions of ship b.
-        ship_a_hull (str)   : Attacking hull zone.
-        trials (int): Number of trials in average calculation.
-        range (str): Attack range.
-    Returns:
-        List[(str, world_state or attack effect tuple)]
-    """
-    state_log = []
-    failures = 0
-    for _ in range(trials):
-        # Reset ship b for each trial
-        ship_b.reset()
-        world_state = WorldState()
-        world_state.addShip(ship_a, 0)
-        world_state.addShip(ship_b, 1)
-        num_rolls = 0
-        # Don't attempt forever in the case of some catastrophic reoccurring error.
-        attempts = 0
-        while 0 < ship_b.hull() and attempts < 250:
-            attempts += 1
-            # Handle the attack and receive the updated world state
-            try:
-                roll_log = []
-                world_state = handleAttack(world_state=world_state, attacker=(ship_a, ship_a_hull),
-                                           defender=(ship_b, "front"), attack_range=attack_range,
-                                           offensive_agent=agent_a, defensive_agent=agent_b,
-                                           state_log=state_log)
-                # Only add these actions to the returned log if they are all legal.
-                state_log += roll_log
-                num_rolls += 1
-            except RuntimeError:
-                # This is fine, the random agent will do illegal things plenty of times
-                pass
-        if 250 == attempts:
-            raise RuntimeError("Too many failures for ship firing simulation.")
-    return state_log
 
 
 def update_lifetime_network(lifenet, batch, labels, optimizer, eval_only=False):
@@ -122,107 +78,59 @@ def update_lifetime_network(lifenet, batch, labels, optimizer, eval_only=False):
     return error
 
 
-def collect_attack_batches(batch, labels, attacks, subphase):
-    """A generator to collect training batches from a list of attack logs.
+@pytest.fixture(scope="session")
+def create_attack_effects_dataset():
+    """Create a training dataset for the "attack - resolve attack effects" subphase.
 
-    Collect all of the actions taken during the resolve attack effects stage of a trial and
-    associate them with the number of additional attacks required to end the trial.  Only sample a
-    single action-state pair from each trial into the training batch though. This avoids the network
-    simply memorizing the output of specific scenarios in the event of fairly unique events (for
-    example a certain unlikely dice roll or combination of shields and hull in the defending ship).
-
-    Args:
-        batch (torch.Tensor)        : Training tensor to fill. First dimension is the batch size.
-        labels (torch.Tensor)       : Labels tensor. First dimension must batch the batch argument.
-        attacks (List[List[tuples]]): Each sublist is all of the states and actions from a sequence.
-        subphase (str)              : Name of the subphase where state/action pairs are collected.
     Returns:
-        Number of items filled.
+        (List[(str, world_state or attack effect tuple)],
+         List[(str, world_state or attack effect tuple)]): Tuple of training and evaluation data.
     """
-    # Variables for collection
-    batch_size = batch.size(0)
-    target_device = batch.device
-    # collect_state records what we are doing inside of the sample loop
-    collect_state = 0
-    # The state and (state, action) pairs collected from the current trial
-    last_state = None
-    state_actions_attacks = []
-    # Counter for the training target
-    attack_count = 0
-    cur_sample = 0
-    for attack in attacks:
-        if 'state' == attack[0]:
-            if attack[1].sub_phase == subphase:
-                last_state = attack[1]
-                # If we are transitioning into a new attack then increase the attack counter.
-                if 0 != collect_state:
-                    attack_count += 1
-                collect_state = 1
-            elif attack[1].sub_phase == "attack - resolve damage" and 0 == attack[1].attack.defender.hull():
-                # The trial has completed, calculate the total number of attacks and choose a
-                # sample for training.
-                collect_state = 3
-            else:
-                # The trial has completed, calculate the total number of attacks and choose a
-                # Waiting for the next attack in the trial or for the trial to end
-                collect_state = 2
-        elif 'action' == attack[0] and 1 == collect_state:
-            # Collect the actions associated with last_state. The attack count will later be
-            # corrected to be the number of total attacks from that state rather than the current
-            # attack.
-            state_actions_attacks.append((last_state, attack[1], attack_count))
-        # Choose a training sample and calculate attacks.
-        if 3 == collect_state and 0 < len(state_actions_attacks):
-            # Collect a single sample
-            selected = random.choice(state_actions_attacks)
-            state_actions_attacks = []
-            # The training label for the last attacks should be 0, for the next to last 1, etc.
-            labels[cur_sample] = attack_count - selected[2]
-            action_encoding = Encodings.encodeAction(selected[0].sub_phase, selected[1])
-            state_encoding, token_slots, die_slots = Encodings.encodeAttackState(selected[0])
-            batch[cur_sample] = torch.cat(
-                (action_encoding.to(target_device), state_encoding.to(target_device)))
-            cur_sample += 1
-            attack_count = 0
-        # When a full batch is collected train immediately.
-        if cur_sample == batch_size:
-            yield(cur_sample)
-            cur_sample = 0
-            
-    # If there are leftover samples then train again
-    if 0 < cur_sample:
-        yield(cur_sample)
+    # Seed the RNG and make sure this test is deterministic
+    torch.manual_seed(0)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    phase = "attack - resolve attack effects"
+    train_dataloader = torch.utils.data.DataLoader(
+            dataset=RandomActionDataset(phase, 2000), batch_size=32, shuffle=False,
+            sampler=None, batch_sampler=None, num_workers=10, pin_memory=True,
+            drop_last=False, multiprocessing_context=None)
+    eval_dataloader = torch.utils.data.DataLoader(
+            dataset=RandomActionDataset(phase, 250, deterministic=True),
+            batch_size=32, shuffle=False,
+            sampler=None, batch_sampler=None, num_workers=7, pin_memory=True,
+            drop_last=False, multiprocessing_context=None)
 
-
-def get_n_examples(n_examples, ship_a, ship_b, agent, queue):
-    """Smallest function to get 'n' examples of a_vs_b.
-
-    This function is meant to be called in parallel to more quickly create training data.
-
-    Arguments:
-        n_examples (int)     : The number of examples to generate.
-        ship_a (Ship)        : The attacking ship.
-        ship_b (Ship)        : The defending ship.
-        agent (LearningAgent): The agent to choose actions.
-        queue (Queue)        : Message passing queue through which to return examples.
-    """
-    attacks = []
-    for _ in range(n_examples):
-        # At short range all hull zones can attack, otherwise only the front zone can attack.
-        attack_range = random.choice(['long', 'medium', 'short', 'short', 'short', 'short'])
-        if attack_range == 'short':
-            hull = random.choice(ArmadaTypes.hull_zones)
-        else:
-            hull = 'front'
-        attacks = attacks + a_vs_b(
-            ship_a = ship_a, ship_b = ship_b, agent_a = agent, agent_b = agent,
-            ship_a_hull = hull, trials = 1, attack_range = attack_range)
-    queue.put(attacks)
-
+    return train_dataloader, eval_dataloader
 
 
 @pytest.fixture(scope="session")
-def create_training_dataset():
+def create_spend_defense_tokens_dataset():
+    """Create a training dataset for the "attack - resolve attack effects" subphase.
+
+    Returns:
+        (List[(str, world_state or attack effect tuple)],
+         List[(str, world_state or attack effect tuple)]): Tuple of training and evaluation data.
+    """
+    # Seed the RNG and make sure this test is deterministic
+    torch.manual_seed(0)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    phase = "attack - spend defense tokens"
+    train_dataloader = torch.utils.data.DataLoader(
+            dataset=RandomActionDataset(phase, 5000), batch_size=32, shuffle=False,
+            sampler=None, batch_sampler=None, num_workers=10, pin_memory=True,
+            drop_last=False, multiprocessing_context=None)
+    eval_dataloader = torch.utils.data.DataLoader(
+            dataset=RandomActionDataset(phase, 250), batch_size=32, shuffle=False,
+            sampler=None, batch_sampler=None, num_workers=8, pin_memory=True,
+            drop_last=False, multiprocessing_context=None)
+
+    return train_dataloader, eval_dataloader
+
+
+@pytest.fixture(scope="session")
+def create_nonrandom_training_dataset():
     """Create a training dataset.
 
     Returns:
@@ -236,47 +144,35 @@ def create_training_dataset():
     # TODO FIXME See all RNGs so that tests cannot fail intermittently
 
     # TODO FIXME Remember to seed the regular Python RNG as well
-    randagent = RandomAgent()
+    agent = SimpleAgent()
 
-    ship_a = ship.Ship(name="Ship A", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=1)
-    ship_b = ship.Ship(name="Ship B", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
+    attacker = ship.Ship(name="Attacker", template=ship_templates["Attacker"], upgrades=[], player_number=1)
 
-    # Make this parallel so that more samples can be quickly generated
+    no_brace = ship.Ship(name="No Defense Tokens", template=ship_templates["No Defense Tokens"], upgrades=[], player_number=2)
+    one_brace = ship.Ship(name="Single Brace", template=ship_templates["Single Brace"], upgrades=[], player_number=2)
+    two_brace = ship.Ship(name="Double Brace", template=ship_templates["Double Brace"], upgrades=[], player_number=2)
+    all_tokens = ship.Ship(name="All Tokens", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
+
+    # Generate 100 trials per pairing to compensate for the natural variability in rolls
     processes = []
     queues = []
-    # Run 250 trials for evaluation
-    eval_threads = 10
-    for _ in range(eval_threads):
-        # At short range all hull zones can attack, otherwise only the front zone can attack.
+    target_ships = [no_brace, one_brace, two_brace, all_tokens]
+    for target in target_ships:
         queues.append(multiprocessing.Queue())
         processes.append(multiprocessing.Process(
-            target=get_n_examples, args=(30, ship_a, ship_b, randagent, queues[-1])))
+            target=get_n_examples, args=(10, ship_a, target, agent, queues[-1])))
         processes[-1].start()
-    eval_attacks = []
-    for p in range(eval_threads):
+
+    data = []
+    for p in range(len(target_ships)):
         eval_attacks += queues[p].get()
         processes[p].join()
 
-    # Make this parallel so that more samples can be quickly generated
-    processes = []
-    queues = []
-    # Run a lot of trials at each range to create training data for lifetime prediction.
-    train_threads = 20
-    for _ in range(train_threads):
-        queues.append(multiprocessing.Queue())
-        processes.append(multiprocessing.Process(
-            target=get_n_examples, args=(200, ship_a, ship_b, randagent, queues[-1])))
-        processes[-1].start()
-    attacks = []
-    for p in range(train_threads):
-        attacks += queues[p].get()
-        processes[p].join()
-
-    return attacks, eval_attacks
+    return data
 
 
 @pytest.fixture(scope="session")
-def resolve_attack_effects_model(create_training_dataset):
+def resolve_attack_effects_model(create_attack_effects_dataset):
     """Train some basic lifetime prediction models.
 
     Create a simple network that predict defending ship lifetimes during the 'resolve attack
@@ -285,7 +181,7 @@ def resolve_attack_effects_model(create_training_dataset):
     Returns:
         (nn.module, list[int], list[int]): The model, training loss, and evaluation loss.
     """
-    attacks, eval_attacks = create_training_dataset
+    attacks, eval_attacks = create_attack_effects_dataset
 
     target_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -309,44 +205,37 @@ def resolve_attack_effects_model(create_training_dataset):
         torch.nn.Linear(2 * input_size, 1))
     network.to(target_device)
     # Higher learning rates lead to a lot of instability in the training.
-    a_optimizer = torch.optim.Adam(network.parameters(), lr=0.0005)
-
-    # Create an evaluation dataset
-    # Using a large batch for evaluation makes it easier to look at statistics since there is so
-    # much noise in the samples.
-    eval_size = 250
-    eval_batch = torch.Tensor(eval_size, input_size).to(target_device)
-    eval_labels = torch.Tensor(eval_size, 1).to(target_device)
+    optimizer = torch.optim.Adam(network.parameters(), lr=0.0005)
 
     # Keep track of the errors for the purpose of this test
     errors = []
     eval_errors = []
 
-    # Grab a batch to evaluate
-    for _ in collect_attack_batches(eval_batch, eval_labels, eval_attacks, phase_name):
-        pass
-
     # Evaluate before training and every epoch
-    eval_errors.append(update_lifetime_network(network, eval_batch,
-                                               eval_labels, None, True))
-
-    batch_size = 32
-    batch = torch.Tensor(batch_size, input_size).to(target_device)
-    labels = torch.Tensor(batch_size, 1).to(target_device)
+    for batch in eval_attacks:
+        eval_data = batch[0].to(target_device)
+        eval_labels = batch[1].to(target_device)
+        eval_errors.append(update_lifetime_network(network, eval_data,
+                                                   eval_labels, None, True))
     # Train with all of the data for 10 epochs
     for epoch in range(10):
-        for num_samples in collect_attack_batches(batch, labels, attacks[:-eval_size], phase_name):
-            errors.append(update_lifetime_network(network, batch[:num_samples],
-                                                  labels[:num_samples], a_optimizer))
+        for batch in attacks:
+            train_data = batch[0].to(target_device)
+            train_labels = batch[1].to(target_device)
+            errors.append(update_lifetime_network(network, train_data,
+                                                  train_labels, optimizer))
         # Evaluate every epoch
-        eval_errors.append(update_lifetime_network(network, eval_batch,
-                                                   eval_labels, None, True))
+        for batch in eval_attacks:
+            eval_data = batch[0].to(target_device)
+            eval_labels = batch[1].to(target_device)
+            eval_errors.append(update_lifetime_network(network, eval_data,
+                                                       eval_labels, None, True))
 
     return network, errors, eval_errors
 
 
 @pytest.fixture(scope="session")
-def spend_defense_tokens_model(create_training_dataset):
+def spend_defense_tokens_model(create_spend_defense_tokens_dataset):
     """Train some basic lifetime prediction models.
 
     Create simple networks that predict defending ship lifetimes during the 'spend defese tokens'
@@ -355,7 +244,7 @@ def spend_defense_tokens_model(create_training_dataset):
     Returns:
         (nn.module, nn.module,): The 'resolve attack effects' and 'spend defense tokens' models.
     """
-    attacks, eval_attacks = create_training_dataset
+    attacks, eval_attacks = create_spend_defense_tokens_dataset
 
     target_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -377,35 +266,28 @@ def spend_defense_tokens_model(create_training_dataset):
     batch_size = 32
     batch = torch.Tensor(batch_size, input_size).to(target_device)
 
-    # Create an evaluation dataset
-    # Using a large batch for evaluation makes it easier to look at statistics since there is so
-    # much noise in the samples.
-    eval_size = 250
-    eval_batch = torch.Tensor(eval_size, input_size).to(target_device)
-    eval_labels = torch.Tensor(eval_size, 1).to(target_device)
-
     # Keep track of the errors for the purpose of this test
     errors = []
     eval_errors = []
 
-    # Grab a batch to evaluate
-    for _ in collect_attack_batches(eval_batch, eval_labels, eval_attacks, phase_name):
-        pass
-
     # Evaluate before training and every epoch
-    eval_errors.append(update_lifetime_network(network, eval_batch,
-                                               eval_labels, None, True))
-
-    batch_size = 32
-    batch = torch.Tensor(batch_size, input_size).to(target_device)
-    labels = torch.Tensor(batch_size, 1).to(target_device)
-
-    for epoch in range(20):
-        for num_samples in collect_attack_batches(batch, labels, attacks, phase_name):
-            errors.append(update_lifetime_network(network, batch[:num_samples],
-                                                  labels[:num_samples], optimizer))
-            # Evaluate every epoch
-            eval_errors.append(update_lifetime_network(network, eval_batch,
+    for batch in eval_attacks:
+        eval_data = batch[0].to(target_device)
+        eval_labels = batch[1].to(target_device)
+        eval_errors.append(update_lifetime_network(network, eval_data,
+                                                   eval_labels, None, True))
+    # Train with all of the data for 10 epochs
+    for epoch in range(10):
+        for batch in attacks:
+            train_data = batch[0].to(target_device)
+            train_labels = batch[1].to(target_device)
+            errors.append(update_lifetime_network(network, train_data,
+                                                  train_labels, optimizer))
+        # Evaluate every epoch
+        for batch in eval_attacks:
+            eval_data = batch[0].to(target_device)
+            eval_labels = batch[1].to(target_device)
+            eval_errors.append(update_lifetime_network(network, eval_data,
                                                        eval_labels, None, True))
 
     return network, errors, eval_errors
@@ -443,7 +325,7 @@ def test_resolve_attack_effects_model(resolve_attack_effects_model):
     attack = AttackState('short', ship_a, 'left', ship_b, 'front', pool_colors, pool_faces)
     world_state.updateAttack(attack)
     action_encoding = Encodings.encodeAction(world_state.sub_phase, None)
-    state_encoding, token_slots, die_slots = Encodings.encodeAttackState(world_state)
+    state_encoding, die_slots = Encodings.encodeAttackState(world_state)
     batch[0] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
@@ -452,7 +334,7 @@ def test_resolve_attack_effects_model(resolve_attack_effects_model):
     attack = AttackState('short', ship_a, 'left', ship_b, 'front', pool_colors, pool_faces)
     world_state.updateAttack(attack)
     action_encoding = Encodings.encodeAction(world_state.sub_phase, None)
-    state_encoding, token_slots, die_slots = Encodings.encodeAttackState(world_state)
+    state_encoding, die_slots = Encodings.encodeAttackState(world_state)
     batch[1] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
@@ -461,7 +343,7 @@ def test_resolve_attack_effects_model(resolve_attack_effects_model):
     world_state.setSubPhase("attack - resolve attack effects")
     attack = AttackState('short', ship_a, 'left', ship_b, 'front', pool_colors, pool_faces)
     world_state.updateAttack(attack)
-    state_encoding, token_slots, die_slots = Encodings.encodeAttackState(world_state)
+    state_encoding, die_slots = Encodings.encodeAttackState(world_state)
     batch[2] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
@@ -470,7 +352,7 @@ def test_resolve_attack_effects_model(resolve_attack_effects_model):
     world_state.setSubPhase("attack - resolve attack effects")
     attack = AttackState('long', ship_a, 'front', ship_b, 'front', pool_colors, pool_faces)
     world_state.updateAttack(attack)
-    state_encoding, token_slots, die_slots = Encodings.encodeAttackState(world_state)
+    state_encoding, die_slots = Encodings.encodeAttackState(world_state)
     batch[3] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
@@ -523,15 +405,17 @@ def test_defense_tokens_model(spend_defense_tokens_model):
     attack = AttackState('short', ship_a, 'left', ship_b, 'front', pool_colors, pool_faces)
     world_state.updateAttack(attack)
     action_encoding = Encodings.encodeAction(world_state.sub_phase, None)
-    state_encoding, token_slots, die_slots = Encodings.encodeAttackState(world_state)
+    state_encoding, die_slots = Encodings.encodeAttackState(world_state)
     batch[0] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
     brace_index = ship_b.defense_tokens.index("green brace")
     action = ("brace", (brace_index, None))
-    world_state.attack.defender_spend_token(brace_index)
+    green = ArmadaTypes.token_colors.index('green')
+    red = ArmadaTypes.token_colors.index('red')
+    world_state.attack.defender_spend_token('brace', green)
     action_encoding = Encodings.encodeAction(world_state.sub_phase, action)
-    state_encoding, token_slots, die_slots = Encodings.encodeAttackState(world_state)
+    state_encoding, die_slots = Encodings.encodeAttackState(world_state)
     batch[1] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
@@ -549,9 +433,9 @@ def test_defense_tokens_model(spend_defense_tokens_model):
 
     redirect_index = ship_b.defense_tokens.index("green redirect")
     action = ("redirect", (redirect_index, [('left', 4)]))
-    world_state.attack.defender_spend_token(redirect_index)
+    world_state.attack.defender_spend_token('redirect', green)
     action_encoding = Encodings.encodeAction(world_state.sub_phase, action)
-    state_encoding, token_slots, die_slots = Encodings.encodeAttackState(world_state)
+    state_encoding, die_slots = Encodings.encodeAttackState(world_state)
     batch[2] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
@@ -575,7 +459,7 @@ def test_policy_network(resolve_attack_effects_model, spend_defense_tokens_model
     # TODO FIXME HERE It would make more sense to just move on to training behaviors.
     # Make a new test to start training actions that yield the highest lifetimes.
     # This would probably require some discounting of the future and multiple runs to get the actual
-    # best outcomes, but we should be able to train a network the same was as in this test and
+    # best outcomes, but we should be able to train a network the same way as in this test and
     # backpropagate through it to maximize some reward (either destroying the defender by choosing
     # accuracies well or prolonging its lifetime by spending tokens wisely).
     pass
