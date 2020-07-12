@@ -85,13 +85,13 @@ class RandomAgent(BaseAgent):
                     # Still in the green token section
                     targets.append((acc_idx,
                                     token_idx,
-                                    ArmadaTypes.token_colors.index("green")))
+                                    ArmadaTypes.green))
                     acc_idx += 1
                 else:
                     # Targetting a red token
                     targets.append((acc_idx,
                                     token_idx - glen,
-                                    ArmadaTypes.token_colors.index("red")))
+                                    ArmadaTypes.red))
                     acc_idx += 1
         if 0 < len(targets):
             return ("accuracy", targets)

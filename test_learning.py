@@ -400,8 +400,10 @@ def test_defense_tokens_model(spend_defense_tokens_model):
     world_state.addShip(ship_b, 1)
     pool_colors, pool_faces = ['black'] * 4, ['hit_crit'] * 4
     world_state.setSubPhase(phase_name)
-    ship_b.shields['front'] = 2
-    ship_b._hull = 3
+    # Set the front hull zone to 2 shields
+    ship_b.get_range('shields')[ArmadaTypes.hull_zones.index('front')] = 2
+    # Set the hull to 3 (by assigning damage to reduce the remaining hull to 3)
+    ship_b.set('damage', ship_b.get('hull') - 3)
     attack = AttackState('short', ship_a, 'left', ship_b, 'front', pool_colors, pool_faces)
     world_state.updateAttack(attack)
     action_encoding = Encodings.encodeAction(world_state.sub_phase, None)
@@ -409,11 +411,8 @@ def test_defense_tokens_model(spend_defense_tokens_model):
     batch[0] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
-    brace_index = ship_b.defense_tokens.index("green brace")
-    action = ("brace", (brace_index, None))
-    green = ArmadaTypes.token_colors.index('green')
-    red = ArmadaTypes.token_colors.index('red')
-    world_state.attack.defender_spend_token('brace', green)
+    action = [("brace", (ArmadaTypes.green, None))]
+    #world_state.attack.defender_spend_token('brace', green)
     action_encoding = Encodings.encodeAction(world_state.sub_phase, action)
     state_encoding, die_slots = Encodings.encodeAttackState(world_state)
     batch[1] = torch.cat(
@@ -426,14 +425,14 @@ def test_defense_tokens_model(spend_defense_tokens_model):
     world_state.addShip(ship_b, 1)
     pool_colors, pool_faces = ['black'] * 4, ['hit_crit'] * 2 + ['hit'] * 2
     world_state.setSubPhase(phase_name)
-    ship_b.shields['front'] = 2
-    ship_b._hull = 3
+    # Set the front hull zone to 2 shields
+    ship_b.get_range('shields')[ArmadaTypes.hull_zones.index('front')] = 2
+    # Set the hull to 3 (by assigning damage to reduce the remaining hull to 3)
+    ship_b.set('damage', ship_b.get('hull') - 3)
     attack = AttackState('short', ship_a, 'left', ship_b, 'front', pool_colors, pool_faces)
     world_state.updateAttack(attack)
 
-    redirect_index = ship_b.defense_tokens.index("green redirect")
-    action = ("redirect", (redirect_index, [('left', 4)]))
-    world_state.attack.defender_spend_token('redirect', green)
+    action = [("redirect", (ArmadaTypes.green, [('left', 4)]))]
     action_encoding = Encodings.encodeAction(world_state.sub_phase, action)
     state_encoding, die_slots = Encodings.encodeAttackState(world_state)
     batch[2] = torch.cat(

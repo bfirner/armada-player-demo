@@ -25,6 +25,8 @@ class ArmadaDimensions:
 class ArmadaTypes:
     defense_tokens = ["evade", "brace", "scatter", "contain", "redirect", "salvo"]
     token_colors = ["green", "red"]
+    green = token_colors.index('green')
+    red = token_colors.index('red')
     max_defense_tokens = 6
     max_command_dials = 6
     ranges = ["short", "medium", "long"]

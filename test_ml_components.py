@@ -168,17 +168,16 @@ def test_red_token_encodings():
     two_scatter = ship.Ship(name="Double Scatter", template=ship_templates["Double Scatter"], upgrades=[], player_number=2)
 
 
-    green = ArmadaTypes.token_colors.index('green')
-    two_brace.spend_token('brace', green)
-    two_brace.spend_token('brace', green)
-    two_redirect.spend_token('redirect', green)
-    two_redirect.spend_token('redirect', green)
-    two_evade.spend_token('evade', green)
-    two_evade.spend_token('evade', green)
-    two_contain.spend_token('contain', green)
-    two_contain.spend_token('contain', green)
-    two_scatter.spend_token('scatter', green)
-    two_scatter.spend_token('scatter', green)
+    two_brace.spend_token('brace', ArmadaTypes.green)
+    two_brace.spend_token('brace', ArmadaTypes.green)
+    two_redirect.spend_token('redirect', ArmadaTypes.green)
+    two_redirect.spend_token('redirect', ArmadaTypes.green)
+    two_evade.spend_token('evade', ArmadaTypes.green)
+    two_evade.spend_token('evade', ArmadaTypes.green)
+    two_contain.spend_token('contain', ArmadaTypes.green)
+    two_contain.spend_token('contain', ArmadaTypes.green)
+    two_scatter.spend_token('scatter', ArmadaTypes.green)
+    two_scatter.spend_token('scatter', ArmadaTypes.green)
 
     enc_two_brace = make_encoding(attacker, two_brace, "short", agent)[0]
     enc_two_redirect = make_encoding(attacker, two_redirect, "short", agent)[0]
@@ -255,8 +254,7 @@ def test_accuracy_encodings():
     three_brace = ship.Ship(name="Double Brace", template=ship_templates["Triple Brace"], upgrades=[], player_number=2)
 
     # Make a brace token red
-    green = ArmadaTypes.token_colors.index('green')
-    three_brace.spend_token('brace', green)
+    three_brace.spend_token('brace', ArmadaTypes.green)
 
     enc_three_brace, world_state = make_encoding(attacker, three_brace, "short", agent)
 
@@ -264,19 +262,16 @@ def test_accuracy_encodings():
     token_begin = Encodings.getAttackTokenOffset()
     token_end = token_begin + ArmadaTypes.max_defense_tokens
 
-    green = ArmadaTypes.token_colors.index('green')
-    red = ArmadaTypes.token_colors.index('red')
-
     # Verify that no tokens are targeted at first 
     assert 0.0 == enc_three_brace[token_begin:token_end].sum()
 
     # Now make a token red and target it
-    three_brace.spend_token('brace', green)
+    three_brace.spend_token('brace', ArmadaTypes.green)
     green_acc_begin = Encodings.getAttackTokenOffset()
     green_acc_end = green_acc_begin + len(ArmadaTypes.defense_tokens)
     red_acc_begin = Encodings.getAttackTokenOffset() + len(ArmadaTypes.defense_tokens)
     red_acc_end = red_acc_begin + len(ArmadaTypes.defense_tokens)
-    world_state.attack.accuracy_defender_token(ArmadaTypes.defense_tokens.index('brace'), red)
+    world_state.attack.accuracy_defender_token(ArmadaTypes.defense_tokens.index('brace'), ArmadaTypes.red)
     encoding, die_mapping = Encodings.encodeAttackState(world_state)
 
     enc_three_brace = Encodings.inPlaceUnmap(encoding, die_mapping)
@@ -287,8 +282,8 @@ def test_accuracy_encodings():
     assert encoding[green_acc_begin:green_acc_end].sum().item() == 0.
 
     # Target both remaining green tokens
-    world_state.attack.accuracy_defender_token(ArmadaTypes.defense_tokens.index('brace'), green)
-    world_state.attack.accuracy_defender_token(ArmadaTypes.defense_tokens.index('brace'), green)
+    world_state.attack.accuracy_defender_token(ArmadaTypes.defense_tokens.index('brace'), ArmadaTypes.green)
+    world_state.attack.accuracy_defender_token(ArmadaTypes.defense_tokens.index('brace'), ArmadaTypes.green)
     encoding, die_mapping = Encodings.encodeAttackState(world_state)
     enc_three_brace = Encodings.inPlaceUnmap(encoding, die_mapping)
 

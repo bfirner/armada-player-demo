@@ -33,12 +33,12 @@ class SimpleAgent(BaseAgent):
         """
         target_idx = 0
         while acc_index < len(accuracies) and target_idx < tokens[0]:
-            targets.append((accuracies[acc_index], token_type, ArmadaTypes.token_colors.index('green')))
+            targets.append((accuracies[acc_index], token_type, ArmadaTypes.green))
             acc_index += 1
             target_idx += 1
         target_idx = 0
         while acc_index < len(accuracies) and target_idx < tokens[1]:
-            targets.append((accuracies[acc_index], token_type, ArmadaTypes.token_colors.index('red')))
+            targets.append((accuracies[acc_index], token_type, ArmadaTypes.red))
             acc_index += 1
             target_idx += 1
         return acc_index

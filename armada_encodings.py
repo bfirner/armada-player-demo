@@ -291,39 +291,40 @@ class Encodings():
             # TODO Just covering tokens for now.
 
             # The action_list is actually a list of action tuples.
-            for action_tuple in action_list:
-                # Offsets used during encodings
-                evade_offset = len(ArmadaTypes.defense_tokens) + ArmadaTypes.max_defense_tokens
-                redirect_offset = evade_offset + Encodings.max_die_slots
+            if action_list is not None:
+                for action_tuple in action_list:
+                    # Offsets used during encodings
+                    evade_offset = len(ArmadaTypes.defense_tokens) + ArmadaTypes.max_defense_tokens
+                    redirect_offset = evade_offset + Encodings.max_die_slots
 
-                action = action_tuple[0]
-                action_args = action_tuple[1]
-                # Verify that we can handle this action
-                if action not in ArmadaTypes.defense_tokens and "none" != action:
-                    raise NotImplementedError(
-                        '"{}" unimplemented for attack phase {}.'.format(action, subphase))
+                    action = action_tuple[0]
+                    action_args = action_tuple[1]
+                    # Verify that we can handle this action
+                    if action not in ArmadaTypes.defense_tokens and "none" != action:
+                        raise NotImplementedError(
+                            '"{}" unimplemented for attack phase {}.'.format(action, subphase))
 
-                # Handle the tokens that do not require targets
-                for ttype in ["brace", "scatter", "contain", "salvo"]:
-                    if ttype == action:
+                    # Handle the tokens that do not require targets
+                    for ttype in ["brace", "scatter", "contain", "salvo"]:
+                        if ttype == action:
+                            token_index = action_args[0]
+                            encoding[ArmadaTypes.defense_tokens.index(ttype)] = 1.
+                            encoding[len(ArmadaTypes.defense_tokens) + token_index] = 1.
+                    # Handle the tokens with targets
+                    if "evade" == action:
                         token_index = action_args[0]
-                        encoding[ArmadaTypes.defense_tokens.index(ttype)] = 1.
+                        encoding[ArmadaTypes.defense_tokens.index(action)] = 1.
                         encoding[len(ArmadaTypes.defense_tokens) + token_index] = 1.
-                # Handle the tokens with targets
-                if "evade" == action:
-                    token_index = action_args[0]
-                    encoding[ArmadaTypes.defense_tokens.index(action)] = 1.
-                    encoding[len(ArmadaTypes.defense_tokens) + token_index] = 1.
-                    targets = action_args[1:]
-                    for target in targets:
-                        encoding[evade_offset + target] = 1.
-                elif "redirect" == action:
-                    token_index = action_args[0]
-                    encoding[ArmadaTypes.defense_tokens.index(action)] = 1.
-                    encoding[len(ArmadaTypes.defense_tokens) + token_index] = 1.
-                    targets = action_args[1]
-                    for target, amount in targets:
-                        encoding[redirect_offset + ArmadaTypes.hull_zones.index(target)] = amount
+                        targets = action_args[1:]
+                        for target in targets:
+                            encoding[evade_offset + target] = 1.
+                    elif "redirect" == action:
+                        token_index = action_args[0]
+                        encoding[ArmadaTypes.defense_tokens.index(action)] = 1.
+                        encoding[len(ArmadaTypes.defense_tokens) + token_index] = 1.
+                        targets = action_args[1]
+                        for target, amount in targets:
+                            encoding[redirect_offset + ArmadaTypes.hull_zones.index(target)] = amount
         else:
             raise NotImplementedError(
                 "Encoding for attack phase {} not implemented.".format(subphase))

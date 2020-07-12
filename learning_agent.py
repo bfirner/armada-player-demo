@@ -129,8 +129,6 @@ class LearningAgent(BaseAgent):
                 return []
 
         # Handle the tokens
-        green = ArmadaTypes.token_colors.index('green')
-        red = ArmadaTypes.token_colors.index('red')
 
         # First check for validity. If the selected token isn't valid then use no token.
         # TODO Perhaps this should be penalized in some way
@@ -165,7 +163,7 @@ class LearningAgent(BaseAgent):
             if len(die_slots) <= die_idx.item():
                 pass
             else:
-                color = green if 0 < defender_green_tokens[evade_index].item() else red
+                color = ArmadaTypes.green if 0 < defender_green_tokens[evade_index].item() else ArmadaTypes.red
                 src_die_slot = die_slots[die_idx.item()]
                 actions.append(("evade", (src_die_slot)))
 
@@ -191,14 +189,14 @@ class LearningAgent(BaseAgent):
 
             # Make sure there is actual redirection
             if None != redir_hull:
-                color = green if 0 < defender_green_tokens[redir_index].item() else red
+                color = ArmadaTypes.green if 0 < defender_green_tokens[redir_index].item() else ArmadaTypes.red
                 actions.append(("redirect", (redir_hull, redir_amount)))
 
         # Other defense tokens with no targets
         for tindx, token_type in enumerate(ArmadaTypes.defense_tokens):
             if token_type not in ["evade", "redirect"]:
                 if 0 < spent_tokens[tindx]:
-                    color = green if 0 < defender_green_tokens[tindx].item() else red
+                    color = ArmadaTypes.green if 0 < defender_green_tokens[tindx].item() else ArmadaTypes.red
                     actions.append((token_type, (color, None)))
 
         return actions
