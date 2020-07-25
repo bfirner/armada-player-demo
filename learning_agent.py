@@ -8,7 +8,7 @@ from armada_encodings import (Encodings)
 from dice import ArmadaDice
 from base_agent import BaseAgent 
 from game_constants import (ArmadaPhases, ArmadaTypes)
-from utility import token_index, adjacent_hulls
+from utility import token_index
 
 import torch
 
@@ -175,7 +175,7 @@ class LearningAgent(BaseAgent):
             # The encoding has a value for each hull zone. We should check if an upgrade allows the
             # defender to redirect to nonadjacent or multiple hull zones, but for now we will just
             # handle the base case. TODO
-            adj_hulls = adjacent_hulls(world_state.attack.defending_hull)
+            adj_hulls = world_state.attack.defender.adjacent_zones(world_state.attack.defending_hull)
 
             # Redirect to whichever hull has the greater value TODO
             redir_hull = None

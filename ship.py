@@ -1,3 +1,6 @@
+#
+# Copyright Bernhard Firner, 2019-2020
+#
 # Ship class and supporting classes
 
 from collections import OrderedDict
@@ -111,7 +114,7 @@ class Ship:
 
         # TODO Check for legality and actually handle
         self.upgrades = upgrades
-        self.width, self.height = ArmadaDimensions.ship_bases[template['Size'].lower()]
+        self.width, self.height = ArmadaDimensions.ship_bases_feet[template['Size'].lower()]
         self.reset()
 
     @staticmethod
