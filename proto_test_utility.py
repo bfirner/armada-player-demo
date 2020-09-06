@@ -14,7 +14,7 @@ bob = Ship(name="Bob", template=ship_templates["Attacker"], upgrades=[], player_
 alice.set(name="location", value=[1.5, 1.5])
 alice.set(name="heading", value=math.pi/2.)
 print(f"Alice location is {alice.get_range('location')}")
-bob.set(name="location", value=[0.1, 0.3])
+bob.set(name="location", value=[1.5, 1.2])
 bob.set(name="heading", value=math.pi/4.)
 print(f"Bob location is {bob.get_range('location')}")
 

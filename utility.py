@@ -217,13 +217,19 @@ def ruler_distance(a, b):
     for corner, side in possible_paths:
         # Calculate the line perpendicular to the side could go from the side to the corner
         side_slope = (side[1][1] - side[0][1]) / (side[1][0] - side[0][0])
-        perp_slope = 1. / side_slope
         # We'll skip being clever here and just make a gigantic perpendicular line and then check
         # for an intersection.
-        perp_point_one = torch.tensor([corner[0].item() - ArmadaDimensions.play_area_width_feet,
-                                       corner[1].item() - ArmadaDimensions.play_area_width_feet * perp_slope])
-        perp_point_two = torch.tensor([corner[0].item() + ArmadaDimensions.play_area_width_feet,
-                                       corner[1].item() + ArmadaDimensions.play_area_width_feet * perp_slope])
+        if 0. == side_slope:
+            perp_point_one = torch.tensor([corner[0].item(),
+                                           corner[1].item() - ArmadaDimensions.play_area_height_feet])
+            perp_point_two = torch.tensor([corner[0].item(),
+                                           corner[1].item() + ArmadaDimensions.play_area_height_feet])
+        else:
+            perp_slope = 1. / side_slope
+            perp_point_one = torch.tensor([corner[0].item() - ArmadaDimensions.play_area_width_feet,
+                                           corner[1].item() - ArmadaDimensions.play_area_width_feet * perp_slope])
+            perp_point_two = torch.tensor([corner[0].item() + ArmadaDimensions.play_area_width_feet,
+                                           corner[1].item() + ArmadaDimensions.play_area_width_feet * perp_slope])
         intercept = find_intersection(torch.stack(side), torch.stack((perp_point_one, perp_point_two)))
         if intercept is not None:
             distance = math.sqrt((corner[0].item() - intercept[0].item())**2 +
