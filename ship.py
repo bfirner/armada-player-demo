@@ -177,7 +177,7 @@ class Ship:
         Ship._enc_index['location'] = cur_idx
         Ship._enc_len['location'] = 2
         cur_idx = Ship._enc_index['location'] + Ship._enc_len['location']
-        # The heading is the rotation of the ship
+        # The heading is the clockwise rotation of the ship in radians
         Ship._enc_index['heading'] = cur_idx
         Ship._enc_len['heading'] = 1
 

@@ -42,6 +42,8 @@ class ArmadaDimensions:
         "medium": ruler_range_mm["medium"] / 304.8,
         "long": ruler_range_mm["long"] / 304.8
     }
+    play_area_width_feet = 6.
+    play_area_height_feet = 3.
     # TODO Squad bases
     # Shield dial protrubrence
     # Shield dials count towards overlapping of obstacles, squadrons, and ships
