@@ -106,3 +106,4 @@ class ArmadaPhases:
             "increment round number"
         ]
     }
+    max_rounds = 6

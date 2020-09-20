@@ -21,7 +21,6 @@ import ship
 import utility
 from armada_encodings import (Encodings)
 from game_constants import (ArmadaTypes)
-from game_engine import handleAttack
 from random_action_dataset import (RandomActionDataset)
 from random_agent import (RandomAgent)
 from world_state import (AttackState, WorldState)
@@ -92,14 +91,13 @@ def create_attack_effects_dataset():
     torch.backends.cudnn.benchmark = False
     phase = "attack - resolve attack effects"
     train_dataloader = torch.utils.data.DataLoader(
-            dataset=RandomActionDataset(phase, 2000), batch_size=32, shuffle=False,
-            sampler=None, batch_sampler=None, num_workers=10, pin_memory=True,
-            drop_last=False, multiprocessing_context=None)
+            dataset=RandomActionDataset(phase, 2000, batch_size=32), batch_size=None, shuffle=False,
+            sampler=None, batch_sampler=None, num_workers=10, pin_memory=True, drop_last=False,
+            multiprocessing_context=None)
     eval_dataloader = torch.utils.data.DataLoader(
-            dataset=RandomActionDataset(phase, 250, deterministic=True),
-            batch_size=32, shuffle=False,
-            sampler=None, batch_sampler=None, num_workers=7, pin_memory=True,
-            drop_last=False, multiprocessing_context=None)
+            dataset=RandomActionDataset(phase, 250, batch_size=32, deterministic=True),
+            batch_size=None, shuffle=False, sampler=None, batch_sampler=None, num_workers=7,
+            pin_memory=True, drop_last=False, multiprocessing_context=None)
 
     return train_dataloader, eval_dataloader
 
@@ -118,13 +116,13 @@ def create_spend_defense_tokens_dataset():
     torch.backends.cudnn.benchmark = False
     phase = "attack - spend defense tokens"
     train_dataloader = torch.utils.data.DataLoader(
-            dataset=RandomActionDataset(phase, 5000), batch_size=32, shuffle=False,
-            sampler=None, batch_sampler=None, num_workers=10, pin_memory=True,
-            drop_last=False, multiprocessing_context=None)
+            dataset=RandomActionDataset(phase, 5000, batch_size=32), batch_size=None, shuffle=False,
+            sampler=None, batch_sampler=None, num_workers=10, pin_memory=True, drop_last=False,
+            multiprocessing_context=None)
     eval_dataloader = torch.utils.data.DataLoader(
-            dataset=RandomActionDataset(phase, 250), batch_size=32, shuffle=False,
-            sampler=None, batch_sampler=None, num_workers=8, pin_memory=True,
-            drop_last=False, multiprocessing_context=None)
+            dataset=RandomActionDataset(phase, 250, batch_size=32), batch_size=None, shuffle=False,
+            sampler=None, batch_sampler=None, num_workers=8, pin_memory=True, drop_last=False,
+            multiprocessing_context=None)
 
     return train_dataloader, eval_dataloader
 
@@ -188,7 +186,10 @@ def resolve_attack_effects_model(create_attack_effects_dataset):
     # Lifetime network A predicts lifetimes given a state and action pair in the 'resolve attack
     # effects' subphase.
     phase_name = "attack - resolve attack effects"
-    input_size = Encodings.calculateActionSize(phase_name) + Encodings.calculateWorldStateSize()
+    world_size = Encodings.calculateWorldStateSize()
+    action_size = Encodings.calculateActionSize(phase_name)
+    attack_size = Encodings.calculateAttackSize()
+    input_size = world_size + action_size + attack_size
     # The network size was made large enough that training plateaued to a stable value
     # If the network is too large it has a tendency to start fitting to specific cases.
     # Batchnorm doesn't seem to help out much with this network and task.
@@ -213,23 +214,32 @@ def resolve_attack_effects_model(create_attack_effects_dataset):
 
     # Evaluate before training and every epoch
     for batch in eval_attacks:
+        #print("Eval batch sizes are {} and {}".format(batch[0].size(), batch[1].size()))
+        #print("Labels are {}".format(batch[1]))
         eval_data = batch[0].to(target_device)
         eval_labels = batch[1].to(target_device)
         eval_errors.append(update_lifetime_network(network, eval_data,
                                                    eval_labels, None, True))
     # Train with all of the data for 10 epochs
     for epoch in range(10):
+        print("Training resolve_attack_effects_model epoch {}".format(epoch))
         for batch in attacks:
+            #print("Train batch sizes are {} and {}".format(batch[0].size(), batch[1].size()))
+            #print("Labels are {}".format(batch[1]))
             train_data = batch[0].to(target_device)
             train_labels = batch[1].to(target_device)
             errors.append(update_lifetime_network(network, train_data,
                                                   train_labels, optimizer))
+            if errors[-1] > 10:
+                print("Found large error {} with labels {}".format(errors[-1], train_labels))
         # Evaluate every epoch
         for batch in eval_attacks:
             eval_data = batch[0].to(target_device)
             eval_labels = batch[1].to(target_device)
             eval_errors.append(update_lifetime_network(network, eval_data,
                                                        eval_labels, None, True))
+            if eval_errors[-1] > 10:
+                print("Found large error {} with labels {}".format(eval_errors[-1], train_labels))
 
     return network, errors, eval_errors
 
@@ -251,7 +261,10 @@ def spend_defense_tokens_model(create_spend_defense_tokens_dataset):
     # Lifetime network B predicts lifetimes given a state and action pair in the 'spend defense
     # tokens' subphase.
     phase_name = "attack - spend defense tokens"
-    input_size = Encodings.calculateActionSize(phase_name) + Encodings.calculateWorldStateSize()
+    world_size = Encodings.calculateWorldStateSize()
+    action_size = Encodings.calculateActionSize(phase_name)
+    attack_size = Encodings.calculateAttackSize()
+    input_size = world_size + action_size + attack_size
     network = torch.nn.Sequential(
         torch.nn.BatchNorm1d(input_size),
         torch.nn.Linear(input_size, 2 * input_size),
@@ -278,6 +291,7 @@ def spend_defense_tokens_model(create_spend_defense_tokens_dataset):
                                                    eval_labels, None, True))
     # Train with all of the data for 10 epochs
     for epoch in range(10):
+        print("Training resolve_spend_defense_tokens_model epoch {}".format(epoch))
         for batch in attacks:
             train_data = batch[0].to(target_device)
             train_labels = batch[1].to(target_device)
@@ -301,7 +315,10 @@ def test_resolve_attack_effects_model(resolve_attack_effects_model):
     network, errors, eval_errors = resolve_attack_effects_model
     network.eval()
     phase_name = "attack - resolve attack effects"
-    input_size = Encodings.calculateActionSize(phase_name) + Encodings.calculateWorldStateSize()
+    world_size = Encodings.calculateWorldStateSize()
+    action_size = Encodings.calculateActionSize(phase_name)
+    attack_size = Encodings.calculateAttackSize()
+    input_size = world_size + action_size + attack_size
 
     target_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     batch_size = 32
@@ -315,6 +332,7 @@ def test_resolve_attack_effects_model(resolve_attack_effects_model):
     # Let's examine predictions for different ranges and hull zones.
     # Create a state from resolve attack effects and an empty action.
     world_state = WorldState()
+    world_state.round = 1
     ship_a = ship.Ship(name="Ship A", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=1)
     ship_b = ship.Ship(name="Ship B", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
     world_state.addShip(ship_a, 0)
@@ -324,7 +342,8 @@ def test_resolve_attack_effects_model(resolve_attack_effects_model):
     ship_b._hull = 1
     attack = AttackState('short', ship_a, 'left', ship_b, 'front', pool_colors, pool_faces)
     world_state.updateAttack(attack)
-    action_encoding = Encodings.encodeAction(world_state.sub_phase, None)
+    action_encoding = torch.cat((Encodings.encodeWorldState(world_state),
+                                 Encodings.encodeAction(world_state.sub_phase, None)))
     state_encoding, die_slots = Encodings.encodeAttackState(world_state)
     batch[0] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
@@ -333,7 +352,8 @@ def test_resolve_attack_effects_model(resolve_attack_effects_model):
     ship_b._hull = 5
     attack = AttackState('short', ship_a, 'left', ship_b, 'front', pool_colors, pool_faces)
     world_state.updateAttack(attack)
-    action_encoding = Encodings.encodeAction(world_state.sub_phase, None)
+    action_encoding = torch.cat((Encodings.encodeWorldState(world_state),
+                                 Encodings.encodeAction(world_state.sub_phase, None)))
     state_encoding, die_slots = Encodings.encodeAttackState(world_state)
     batch[1] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
@@ -372,14 +392,17 @@ def test_defense_tokens_model(spend_defense_tokens_model):
     network, errors, eval_errors = spend_defense_tokens_model
     network.eval()
     phase_name = "attack - spend defense tokens"
-    input_size = Encodings.calculateActionSize(phase_name) + Encodings.calculateWorldStateSize()
+    world_size = Encodings.calculateWorldStateSize()
+    action_size = Encodings.calculateActionSize(phase_name)
+    attack_size = Encodings.calculateAttackSize()
+    input_size = world_size + action_size + attack_size
 
     target_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     batch_size = 32
     batch = torch.Tensor(batch_size, input_size).to(target_device)
 
-    print("First and last errors in b are {} and {}".format(eval_errors[0], eval_errors[-1]))
-    #print("All errors in b are {}".format(eval_errors))
+    print("Eval errors for B were {}".format(eval_errors))
+    #print("First and last errors in b are {} and {}".format(eval_errors[0], eval_errors[-1]))
 
     assert eval_errors[0] > eval_errors[-1]
 
@@ -392,8 +415,9 @@ def test_defense_tokens_model(spend_defense_tokens_model):
     # 2.1 An attack that can barely destroy the ship
     # 2.2 An attack that barely will not destroy the ship
     # Result: 2.1 should have lower lifetime than 2.2.
-    # Ideally 1.1 and 2.1 would have 0 lifetimes.
+    # Ideally 1.1 and 2.1 would predict the current round.
     world_state = WorldState()
+    world_state.round = 1
     ship_a = ship.Ship(name="Ship A", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=1)
     ship_b = ship.Ship(name="Ship B", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
     world_state.addShip(ship_a, 0)
@@ -406,19 +430,22 @@ def test_defense_tokens_model(spend_defense_tokens_model):
     ship_b.set('damage', ship_b.get('hull') - 3)
     attack = AttackState('short', ship_a, 'left', ship_b, 'front', pool_colors, pool_faces)
     world_state.updateAttack(attack)
-    action_encoding = Encodings.encodeAction(world_state.sub_phase, None)
+    action_encoding = torch.cat((Encodings.encodeWorldState(world_state),
+                                 Encodings.encodeAction(world_state.sub_phase, None)))
     state_encoding, die_slots = Encodings.encodeAttackState(world_state)
     batch[0] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
     action = [("brace", (ArmadaTypes.green, None))]
     #world_state.attack.defender_spend_token('brace', green)
-    action_encoding = Encodings.encodeAction(world_state.sub_phase, action)
+    action_encoding = torch.cat((Encodings.encodeWorldState(world_state),
+                                 Encodings.encodeAction(world_state.sub_phase, action)))
     state_encoding, die_slots = Encodings.encodeAttackState(world_state)
     batch[1] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
     world_state = WorldState()
+    world_state.round = 1
     ship_a = ship.Ship(name="Ship A", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=1)
     ship_b = ship.Ship(name="Ship B", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
     world_state.addShip(ship_a, 0)
@@ -433,17 +460,18 @@ def test_defense_tokens_model(spend_defense_tokens_model):
     world_state.updateAttack(attack)
 
     action = [("redirect", (ArmadaTypes.green, [('left', 4)]))]
-    action_encoding = Encodings.encodeAction(world_state.sub_phase, action)
+    action_encoding = torch.cat((Encodings.encodeWorldState(world_state),
+                                 Encodings.encodeAction(world_state.sub_phase, action)))
     state_encoding, die_slots = Encodings.encodeAttackState(world_state)
     batch[2] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
-    lifetime_out = network(batch[:3])
-    print("super cool lifetimes are {}".format(lifetime_out[:3]))
+    round_status = network(batch[:3])
+    print("super cool estimated rounds of destructions are {}".format(round_status[:3]))
 
-    # Using no defense token results in destruction, lifetime should be less
-    assert(lifetime_out[0].item() < lifetime_out[1].item())
-    assert(lifetime_out[0].item() < lifetime_out[2].item())
+    # Using no defense token results in destruction, the final round should be less
+    assert(round_status[0].item() < round_status[1].item())
+    assert(round_status[0].item() < round_status[2].item())
 
 
 def test_policy_network(resolve_attack_effects_model, spend_defense_tokens_model):

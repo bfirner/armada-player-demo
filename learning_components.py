@@ -4,7 +4,7 @@ import random
 import torch
 
 from armada_encodings import (Encodings)
-from game_constants import (ArmadaTypes)
+from game_constants import (ArmadaPhases, ArmadaTypes)
 from game_engine import handleAttack
 from world_state import (WorldState)
 
@@ -31,21 +31,21 @@ def a_vs_b(ship_a, ship_b, agent_a, agent_b, ship_a_hull, trials, attack_range):
         world_state = WorldState()
         world_state.addShip(ship_a, 0)
         world_state.addShip(ship_b, 1)
-        num_rolls = 0
+        world_state.round += 1
         # Don't attempt forever in the case of some catastrophic reoccurring error.
         attempts = 0
-        while ship_b.damage_cards() < ship_b.hull() and attempts < 250:
+        while ship_b.damage_cards() < ship_b.hull() and world_state.round <= ArmadaPhases.max_rounds:
             attempts += 1
             # Handle the attack and receive the updated world state
             try:
-                roll_log = []
                 world_state = handleAttack(world_state=world_state, attacker=(ship_a, ship_a_hull),
                                            defender=(ship_b, "front"), attack_range=attack_range,
                                            offensive_agent=agent_a, defensive_agent=agent_b,
                                            state_log=state_log)
-                # Only add these actions to the returned log if they are all legal.
-                state_log += roll_log
-                num_rolls += 1
+                # Record the final state with the incremented round number.
+                world_state.setPhase("status phase", "increment round number")
+                world_state.round += 1
+                state_log.append(('state', world_state.clone()))
             except RuntimeError as err:
                 # This is fine, the random agent will do illegal things plenty of times
                 pass
@@ -86,10 +86,10 @@ def collect_attack_batches(batch, labels, attacks, subphase):
     """A generator to collect training batches from a list of attack logs.
 
     Collect all of the actions taken during the resolve attack effects stage of a trial and
-    associate them with the number of additional attacks required to end the trial.  Only sample a
-    single action-state pair from each trial into the training batch though. This avoids the network
-    simply memorizing the output of specific scenarios in the event of fairly unique events (for
-    example a certain unlikely dice roll or combination of shields and hull in the defending ship).
+    associate them with the round number when the trial ended.  Only sample a single action-state
+    pair from each trial into the training batch though. This avoids the network simply memorizing
+    the output of specific scenarios in the event of fairly unique events (for example a certain
+    unlikely dice roll or combination of shields and hull in the defending ship).
 
     Args:
         batch (torch.Tensor)        : Training tensor to fill. First dimension is the batch size.
@@ -110,46 +110,57 @@ def collect_attack_batches(batch, labels, attacks, subphase):
     # Counter for the training target
     attack_count = 0
     cur_sample = 0
-    for attack in attacks:
-        if 'state' == attack[0]:
-            if attack[1].sub_phase == "attack - declare":
-                # If we are transitioning into a new attack then increase the attack counter.
-                attack_count += 1
-            if attack[1].sub_phase == subphase:
-                last_state = attack[1]
-                collect_state = 1
-            elif (attack[1].sub_phase == "attack - resolve damage" and
-                    attack[1].attack.defender.damage_cards() >= attack[1].attack.defender.hull()):
-                # The trial has completed, calculate the total number of attacks and choose a
-                # sample for training.
-                collect_state = 3
-            else:
-                # Not in the desired subphase and the attack trial is not complete.
-                # Waiting for the next attack in the trial or for the trial to end.
-                collect_state = 2
-        elif 'action' == attack[0] and 1 == collect_state:
-            # Collect the actions associated with last_state. The attack count will later be
-            # corrected to be the number of total attacks from that state rather than the current
-            # attack.
-            state_actions_attacks.append((last_state, attack[1], attack_count))
-        # Choose a training sample and calculate attacks.
-        if 3 == collect_state and 0 < len(state_actions_attacks):
-            # Collect a single sample
-            selected = random.choice(state_actions_attacks)
-            state_actions_attacks = []
-            # The training label for the last attacks should be 0, for the next to last 1, etc.
-            labels[cur_sample] = attack_count - selected[2]
-            action_encoding = Encodings.encodeAction(selected[0].sub_phase, selected[1])
-            state_encoding, die_slots = Encodings.encodeAttackState(selected[0])
-            batch[cur_sample] = torch.cat(
-                (action_encoding.to(target_device), state_encoding.to(target_device)))
-            cur_sample += 1
-            attack_count = 0
-        # When a full batch is collected return it immediately.
-        if cur_sample == batch_size:
-            yield(cur_sample)
-            cur_sample = 0
+    last_round = 0
+    for sequence in attacks:
+        for attack in sequence:
+            if 'state' == attack[0]:
+                last_round = attack[1].round
+                if attack[1].sub_phase == "attack - declare":
+                    # If we are transitioning into a new attack then increase the attack counter.
+                    attack_count += 1
+                if attack[1].sub_phase == subphase:
+                    last_state = attack[1]
+                    collect_state = 1
+                elif ArmadaPhases.max_rounds < last_round:
+                    # The trial has completed.
+                    collect_state = 3
+                elif (attack[1].sub_phase == "attack - resolve damage" and
+                        attack[1].attack.defender.damage_cards() >= attack[1].attack.defender.hull()):
+                    # The trial has completed.
+                    collect_state = 3
+                else:
+                    # Not in the desired subphase and the attack trial is not complete.
+                    # Waiting for the next attack in the trial or for the trial to end.
+                    collect_state = 2
+            elif 'action' == attack[0] and 1 == collect_state:
+                # Collect the actions associated with last_state. The attack count will later be
+                # corrected to be the number of total attacks from that state rather than the current
+                # attack.
+                state_actions_attacks.append((last_state, attack[1], attack_count))
+            # Choose a training sample and calculate attacks.
+            if 3 == collect_state and 0 < len(state_actions_attacks):
+                # Collect a single sample
+                selected = random.choice(state_actions_attacks)
+                state_actions_attacks = []
+                # The training label is the final round where the ship was destroyed, or 7 if the ship
+                # was not destroyed in the 6 game rounds.
+                labels[cur_sample] = last_round
+                world_size = Encodings.calculateWorldStateSize()
+                action_size = Encodings.calculateActionSize(selected[0].sub_phase)
+                attack_size = Encodings.calculateAttackSize()
+                Encodings.encodeWorldState(world_state=selected[0], encoding=batch[cur_sample,:world_size])
+                Encodings.encodeAction(subphase=selected[0].sub_phase,
+                                       action_list=selected[1],
+                                       encoding=batch[cur_sample,world_size:world_size + action_size])
+                _, die_slots = Encodings.encodeAttackState(world_state=selected[0],
+                                                           encoding=batch[cur_sample,world_size + action_size:])
+                cur_sample += 1
+                attack_count = 0
+            # When a full batch is collected return it immediately.
+            if cur_sample == batch_size:
+                yield(cur_sample)
+                cur_sample = 0
             
-    # If there are leftover samples then train again
+    # If there are leftover samples that did not fill a batch still return them.
     if 0 < cur_sample:
-        yield(cur_sample)
+        return cur_sample

@@ -17,7 +17,7 @@ class RandomActionDataset(torch.utils.data.IterableDataset):
     """Dataset to create random actions."""
 
 
-    def __init__(self, subphase, num_samples, deterministic=False):
+    def __init__(self, subphase, num_samples, batch_size=32, deterministic=False):
         """Dataset for random actions.
 
         Arguments:
@@ -26,9 +26,13 @@ class RandomActionDataset(torch.utils.data.IterableDataset):
             deterministic(bool): Make each iteration produce the same results.
         """
         super(RandomActionDataset).__init__()
-        self.num_samples = num_samples
         self.subphase = subphase
-        self.input_size = Encodings.calculateActionSize(self.subphase) + Encodings.calculateWorldStateSize()
+        self.num_samples = num_samples
+        self.batch_size = batch_size
+        world_size = Encodings.calculateWorldStateSize()
+        action_size = Encodings.calculateActionSize(self.subphase)
+        attack_size = Encodings.calculateAttackSize()
+        self.input_size = world_size + action_size + attack_size
         self.deterministic = deterministic
 
         # Variables for data generation
@@ -63,19 +67,20 @@ class RandomActionDataset(torch.utils.data.IterableDataset):
             torch.manual_seed(16)
             random.seed(16)
         #TODO generate a sample and yield it
-        # TODO FIXME HERE Modify get_n_examples to separate each attack into a subarray. Modify
-        # collect_attack_batches to only sample from each attack once.
         samples = get_n_examples(n_examples=iter_end - iter_begin, ship_a=self.ship_a,
                                  ship_b=self.ship_b, agent=self.randagent)
-        batch_size = 1
-        num_samples = 0
-        for sample in samples:
-            num_samples += 1
-            # This will collect just one example per scenario, which should ensure no bias in the
-            # samples that would result in biased learning.
-            num_collected = 0
-            batch = torch.Tensor(batch_size, self.input_size)
-            labels = torch.Tensor(batch_size, 1)
-            for _ in collect_attack_batches(batch, labels, sample, self.subphase):
-                num_collected += 1
-                yield([batch[0], labels[0]])
+        # This will collect just one example per scenario, which should ensure no bias in the
+        # samples that would result in biased learning.
+        num_collected = 0
+        batch = torch.Tensor(self.batch_size, self.input_size)
+        labels = torch.Tensor(self.batch_size, 1)
+        last_nsamples = 1
+        for nsamples in collect_attack_batches(batch, labels, samples[num_collected:], self.subphase):
+            num_collected += nsamples
+            # Return if there is no more data.
+            if 0 == num_collected:
+                return
+            yield((batch[:nsamples], labels[:nsamples]))
+            # Return if the requested amount of data has already been generated.
+            if num_collected >= len(samples):
+                return

@@ -80,7 +80,7 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
     if state_log is not None:
         state_log.append(('state', world_state.clone()))
 
-    attack_effect_tuple = offensive_agent.handle(world_state)
+    attack_effect_tuple = offensive_agent.handle(world_state = world_state)
     # Log if the log is present
     if state_log is not None:
         state_log.append(('action', attack_effect_tuple))

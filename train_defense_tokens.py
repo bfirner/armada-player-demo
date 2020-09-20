@@ -269,7 +269,6 @@ while len(examples) < args.simruns:
     attacker_name = random.choice(ship_names)
     defender_name = random.choice(ship_names)
 
-    # TODO FIXME HERE it looks like if a ship is re-used it does not get its hull and shields back!
     attacker = ship.Ship(name=attacker_name, template=ship_templates[attacker_name], upgrades=[], player_number=1)
     defender = ship.Ship(name=defender_name, template=ship_templates[defender_name], upgrades=[], player_number=2)
 
@@ -294,6 +293,7 @@ while len(examples) < args.simruns:
                                        defender=(defender, defend_hull), attack_range=attack_range,
                                        offensive_agent=prediction_agent,
                                        defensive_agent=prediction_agent)
+            world_state.round += 1
             # Get the (state, action) pairs back
             state_action_pairs = prediction_agent.returnStateActions()
             state_actions.append(state_action_pairs)

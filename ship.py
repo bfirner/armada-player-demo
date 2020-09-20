@@ -50,6 +50,7 @@ class Ship:
             player_number (int)          : The player who controls this ship.
             device (str)                 : Default Tensor type ('cuda' or 'cpu'). Automatic if None.
         """
+        self.name = name
         if device is None:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.encoding = torch.zeros(Ship.encodeSize()).to(device)
@@ -109,8 +110,6 @@ class Ship:
                     hull_offset = ArmadaTypes.hull_zones.index(zone)
                     number = int(template[name])
                     self.encoding[idx + hull_offset * len(ArmadaDice.die_colors) + j] = number
-
-        self.name = name
 
         # TODO Check for legality and actually handle
         self.upgrades = upgrades

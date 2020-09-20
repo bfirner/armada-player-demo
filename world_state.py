@@ -114,6 +114,7 @@ class WorldState:
         self.main_phase = "setup phase"
         self.sub_phase = ""
         self.full_phase = "setup phase"
+        self.round = 0
 
         # No current attack
         self.attack = None

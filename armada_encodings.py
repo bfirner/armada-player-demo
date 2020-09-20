@@ -113,16 +113,21 @@ class Encodings():
 
         return encoding
 
-    def encodeAttackState(world_state):
+    def encodeAttackState(world_state, encoding=None):
         """
         Args:
             world_state (WorldState) : Current world state
+            encoding (torch.Tensor)  : Optional memory for in-place encoding. A new tensor is created
+                                       if encoding is not provided.
         Returns:
             (torch.Tensor)           : Encoding of the world state used as network input.
             (List[int])              : Die slot mapping (source to encoding index)
         """
         attack_enc_size = Encodings.calculateAttackSize()
-        encoding = torch.zeros(attack_enc_size)
+        if encoding is None:
+            encoding = torch.zeros(attack_enc_size)
+        elif encoding.size(0) != attack_enc_size:
+            raise RuntimeError("Tensor given to encodeAttackState is not the expected size.")
 
         # Now populate the tensor
         attack = world_state.attack
@@ -196,8 +201,8 @@ class Encodings():
 
         # TODO FIXME This should probably accept an argument specifying the phase whose size should
         # be returned.
-        # Start from 0 and build ourselves up
-        world_state_size = 0
+        # Only the current round is encoded at this moment.
+        world_state_size = 1
 
         # TODO Encoding of the current main and sub phase
 
@@ -208,6 +213,26 @@ class Encodings():
         # TODO This is the simplest possible thing to do while we are only concerned with attack
         # states, but must be fixed as we expand beyond that.
         return Encodings.calculateAttackSize() + world_state_size
+
+    def encodeWorldState(world_state, encoding=None):
+        """Calculate the encoding of the current world state.
+
+        Arguments:
+            world_state (WorldState): Current state.
+            encoding (torch.Tensor) : Optional memory for in-place encoding. A new tensor is created
+                                      if encoding is not provided.
+        Returns:
+            (torch.Tensor) : Encoding of the current state.
+        """
+        if encoding is None:
+            encoding = torch.zeros(Encodings.calculateWorldStateSize())
+        elif encoding.size(0) != Encodings.calculateWorldStateSize():
+            raise RuntimeError("Tensor given to encodeWorldState is not the expected size.")
+
+        # TODO Everything else needs to also be encoded obviously
+        encoding[0] = world_state.round
+
+        return encoding
 
     def calculateActionSize(subphase):
         """Calculate the encoding of an action in the given subphase.
@@ -247,18 +272,22 @@ class Encodings():
             raise NotImplementedError(
                 "Encoding for attack phase {} not implemented.".format(subphase))
 
-    def encodeAction(subphase, action_list):
+    def encodeAction(subphase, action_list, encoding=None):
         """Calculate the encoding of an action in the given subphase.
 
         Arguments:
             subphase (str)          : A string from the subphases in game_constants.py
             action_list ([str, ...]): A list of strings and arguments describing the actions.
+            encoding (torch.Tensor) : Optional memory for in-place encoding. A new tensor is created
+                                      if encoding is not provided.
 
         Returns:
             (torch.Tensor)      : Encoding of the action described by action_tuple.
         """
-
-        encoding = torch.zeros(Encodings.calculateActionSize(subphase))
+        if encoding is None:
+            encoding = torch.zeros(Encodings.calculateActionSize(subphase))
+        elif encoding.size(0) != Encodings.calculateActionSize(subphase):
+            raise RuntimeError("Memory given to encodeAction is not the expected size.")
 
         if "attack - resolve attack effects" == subphase:
             # Manipulate dice in the dice pool. Every ability or action that can occur needs to have
