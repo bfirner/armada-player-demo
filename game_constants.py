@@ -72,21 +72,15 @@ class ArmadaTypes:
         "rear": ("left-auxiliary", "right-auxiliary")}
 
 class ArmadaPhases:
-    main_phases = [
-        "command phase",                    # Assign command dials to all ships
-        "ship phase",                       # Players alternate activating ships or passing
-        "squadron phase",                   # Players alternate activating two squadrons at a time
-        "status phase"                      # Ready defense tokens and exhausted upgrades, increment round number or finish the game
-    ]
 
     # This enumeration may seem a little silly, but it allows for more
     # flexibility in the future if certain upgrades create new actions in some
     # of these phases or change the order of actions.
     sub_phases = {
-        "command phase": [
+        "command phase": [         # Assign command dials to all ships
             "assign command dials"
         ],
-        "ship phase": [
+        "ship phase": [            # Players alternate activating ships or passing
             "reveal command dial", # Choose to take the dial as a command or token. Perform squadron and/or engineering.
             "attack - declare",    # Declare a target to attack
             "attack - roll attack dice",       # Roll the initial dice pool
@@ -96,14 +90,15 @@ class ArmadaPhases:
             "attack - declare additional squadron target", # Only if attacking squadrons
             "execute maneuver",    # Resolve maneuver commands and move.
         ],
-        "squadron phase": [
+        "squadron phase": [        # Players alternate activating two squadrons at a time
             "move squadron",
             "attack"
         ],
-        "status phase": [
+        "status phase": [          # Ready defense tokens and exhausted upgrades, increment round number or finish the game
             "ready defense tokens",
             "unexhaust upgrades",
             "increment round number"
         ]
     }
+    main_phases = list(sub_phases.keys())
     max_rounds = 6

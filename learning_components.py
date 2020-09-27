@@ -111,6 +111,9 @@ def collect_attack_batches(batch, labels, attacks, subphase):
     attack_count = 0
     cur_sample = 0
     last_round = 0
+    # Initialize buffers to 0
+    batch.fill_(0.)
+    labels.fill_(0.)
     for sequence in attacks:
         for attack in sequence:
             if 'state' == attack[0]:

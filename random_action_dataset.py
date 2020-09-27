@@ -54,9 +54,10 @@ class RandomActionDataset(torch.utils.data.IterableDataset):
         iter_end = self.num_samples
         # Different sampling behavior for single thread and multi-thread data loading
         if worker_info is not None:
-            iter_end = int(self.num_samples / worker_info.num_workers)
-            if (worker_info.id + 1) <= self.num_samples % worker_info.num_workers:
-                iter_end += 1
+            iter_end = self.num_samples // worker_info.num_workers
+            # The first worker will fetch any remainder
+            if 1 == worker_info.id:
+                iter_end += self.num_samples % worker_info.num_workers
             if self.deterministic:
                 torch.manual_seed(worker_info.id)
                 random.seed(worker_info.id)
@@ -72,8 +73,8 @@ class RandomActionDataset(torch.utils.data.IterableDataset):
         # This will collect just one example per scenario, which should ensure no bias in the
         # samples that would result in biased learning.
         num_collected = 0
-        batch = torch.Tensor(self.batch_size, self.input_size)
-        labels = torch.Tensor(self.batch_size, 1)
+        batch = torch.zeros(self.batch_size, self.input_size)
+        labels = torch.zeros(self.batch_size, 1)
         last_nsamples = 1
         for nsamples in collect_attack_batches(batch, labels, samples[num_collected:], self.subphase):
             num_collected += nsamples

@@ -201,10 +201,11 @@ class Encodings():
 
         # TODO FIXME This should probably accept an argument specifying the phase whose size should
         # be returned.
-        # Only the current round is encoded at this moment.
-        world_state_size = 1
 
-        # TODO Encoding of the current main and sub phase
+        # The current round is encoded at this moment.
+        world_state_size = 1
+        # Encoding of the current main and sub phase
+        world_state_size += 2
 
         # TODO Attack encoding (or 0s if not in an attack phase)
 
@@ -231,6 +232,16 @@ class Encodings():
 
         # TODO Everything else needs to also be encoded obviously
         encoding[0] = world_state.round
+        if world_state.main_phase in ArmadaPhases.main_phases:
+            encoding[1] = ArmadaPhases.main_phases.index(world_state.main_phase)
+            sub_phase_names = ArmadaPhases.sub_phases[world_state.main_phase]
+            if world_state.sub_phase in sub_phase_names:
+                encoding[2] = sub_phase_names.index(world_state.sub_phase)
+            else:
+                encoding[2] = -1
+        else:
+            encoding[1] = -1
+            encoding[2] = -1
 
         return encoding
 
