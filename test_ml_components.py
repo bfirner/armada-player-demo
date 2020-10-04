@@ -57,8 +57,7 @@ def make_encoding(ship_a, ship_b, attack_range, agent):
 
     # The defense token and die locations have been reordered in the encoding, put them back to
     # their original ordering here.
-    encoding, die_slot_mapping = Encodings.encodeAttackState(world_state)
-    Encodings.inPlaceUnmap(encoding, die_slot_mapping)
+    encoding = Encodings.encodeAttackState(world_state)
 
     return encoding, world_state
 
@@ -74,7 +73,8 @@ def test_get_training_examples():
     phase = "attack - resolve attack effects"
     batch_size = 32
     train_dataloader = torch.utils.data.DataLoader(
-            dataset=RandomActionDataset(phase, 100), batch_size=batch_size, shuffle=False,
+            dataset=RandomActionDataset(subphase=phase, num_samples=100, batch_size=batch_size),
+            batch_size=None, shuffle=False,
             sampler=None, batch_sampler=None, num_workers=2, pin_memory=True,
             drop_last=False, multiprocessing_context=None)
 
@@ -88,7 +88,8 @@ def test_get_training_examples():
     # Use a dataloader with the RandomActionDataset
     phase = "attack - spend defense tokens"
     eval_dataloader = torch.utils.data.DataLoader(
-            dataset=RandomActionDataset(phase, 100, deterministic=True),
+            dataset=RandomActionDataset(subphase=phase, num_samples=100, batch_size=batch_size,
+                                        deterministic=True),
             batch_size=batch_size, shuffle=False,
             sampler=None, batch_sampler=None, num_workers=2, pin_memory=True,
             drop_last=False, timeout=0, multiprocessing_context=None)
@@ -228,8 +229,7 @@ def test_spent_encodings():
     for tidx, ttype in enumerate(ArmadaTypes.defense_tokens):
         world_state.attack.defender_spend_token(ttype, 'green')
 
-    encoding, die_slot_mapping = Encodings.encodeAttackState(world_state)
-    Encodings.inPlaceUnmap(encoding, die_slot_mapping)
+    encoding = Encodings.encodeAttackState(world_state)
     assert torch.sum(encoding[spent_begin:spent_end]).item() == len(ArmadaTypes.defense_tokens)
 
     # Try spending the tokens at different indices
@@ -239,8 +239,7 @@ def test_spent_encodings():
         defender = ship.Ship(name="Defender", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
         encoding, world_state = make_encoding(attacker, defender, "short", agent)
         world_state.attack.defender_spend_token(ttype, 'green')
-        encoding, die_slot_mapping = Encodings.encodeAttackState(world_state)
-        encoding = Encodings.inPlaceUnmap(encoding, die_slot_mapping)
+        encoding = Encodings.encodeAttackState(world_state)
         assert torch.sum(encoding[spent_begin:spent_end]).item() == 1.0
         assert encoding[spent_begin:spent_end][tidx].item() == 1.0
 
@@ -272,9 +271,7 @@ def test_accuracy_encodings():
     red_acc_begin = Encodings.getAttackTokenOffset() + len(ArmadaTypes.defense_tokens)
     red_acc_end = red_acc_begin + len(ArmadaTypes.defense_tokens)
     world_state.attack.accuracy_defender_token(ArmadaTypes.defense_tokens.index('brace'), ArmadaTypes.red)
-    encoding, die_mapping = Encodings.encodeAttackState(world_state)
-
-    enc_three_brace = Encodings.inPlaceUnmap(encoding, die_mapping)
+    encoding = Encodings.encodeAttackState(world_state)
 
     # Verify that only the red token has the accuracy flag set
     assert encoding[red_acc_begin + ArmadaTypes.defense_tokens.index('brace')].item() == 1.
@@ -284,8 +281,7 @@ def test_accuracy_encodings():
     # Target both remaining green tokens
     world_state.attack.accuracy_defender_token(ArmadaTypes.defense_tokens.index('brace'), ArmadaTypes.green)
     world_state.attack.accuracy_defender_token(ArmadaTypes.defense_tokens.index('brace'), ArmadaTypes.green)
-    encoding, die_mapping = Encodings.encodeAttackState(world_state)
-    enc_three_brace = Encodings.inPlaceUnmap(encoding, die_mapping)
+    encoding = Encodings.encodeAttackState(world_state)
 
     # Verify that two green and one red brace have the accuracy flag
     assert encoding[red_acc_begin + ArmadaTypes.defense_tokens.index('brace')].item() == 1.
@@ -330,33 +326,11 @@ def test_roll_encodings():
         world_state.updateAttack(attack)
         # Make a random roll and encode the attack state
         # [ color - 3, face - 6]
-        enc_attack = Encodings.encodeAttackState(world_state)[0]
-        # Try to find a match for each color,face pair
-        for slot in range(Encodings.max_die_slots):
-            begin = dice_begin + slot * Encodings.hot_die_size
-            end = begin + Encodings.hot_die_size
-            dice_section = enc_attack[begin:end]
-            # Should have a face and color or be empty
-            assert (0 == dice_section.sum() or 2 == dice_section.sum())
-
-            # There should be a color and a face
-            if 0 != dice_section.sum():
-                die_color = "none"
-                for offset, color in enumerate(ArmadaDice.die_colors):
-                    if 1.0 == dice_section[offset]:
-                        die_color = color
-                assert "none" != die_color
-
-                die_face = "none"
-                for offset, face in enumerate(ArmadaDice.die_faces_frequencies):
-                    if 1.0 == dice_section[len(ArmadaDice.die_colors) + offset]:
-                        die_face = face
-                assert "none" != die_face
-
-                for idx, matched in enumerate(matched_dice):
-                    if (0 == matched and pool_faces[idx] == die_face and
-                        pool_colors[idx] == die_color):
-                        matched_dice[idx] = 1
-                        break
-        # All dice should have been matched
-        assert len(pool_faces) == sum(matched_dice)
+        enc_attack = Encodings.encodeAttackState(world_state)
+        # Try to find a match for each color,face pair in the encoding
+        enc_dice = enc_attack[Encodings.getAttackDiceOffset():]
+        for face, color in zip(attack.pool_faces, attack.pool_colors):
+            assert 0. < enc_dice[Encodings.dieOffset(color=color, face=face)].item()
+            enc_dice[Encodings.dieOffset(color=color, face=face)] -= 1
+        # All dice from the pool should have been matched and there should be no more encoded
+        assert sum(enc_dice) <= 0.

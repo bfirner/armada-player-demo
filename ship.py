@@ -40,80 +40,92 @@ class ShipType:
         self.attributes = attributes
 
 class Ship:
-    def __init__(self, name, template, upgrades, player_number, device=None):
+    def __init__(self, name, player_number, template=None, upgrades=None, encoding=None, device=None):
         """Contsruct a specific instance of a ship.
         
         Args:
             name (str)                   : Name for this vessel.
+            player_number (int)          : The player who controls this ship.
             template (ShipType)          : Ship template to copy.
             upgrades (table str->str)    : Upgrades to equip.
-            player_number (int)          : The player who controls this ship.
+            encoding (torch.Tensor)      : An existing encoding to copy (if template and upgrades
+                                           are None)
             device (str)                 : Default Tensor type ('cuda' or 'cpu'). Automatic if None.
         """
+        if (template is None or upgrades is None) and encoding is None:
+            raise RuntimeError("Ship requires either template and updrades or encoding.")
+
         self.name = name
         if device is None:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.encoding = torch.zeros(Ship.encodeSize()).to(device)
 
-        self.encoding.fill_(0.)
-        # Initialize attributes of this specific ship instance
-        self.set('player', player_number)
-        self.set('hull', int(template["Hull"]))
+        if encoding is not None:
+            self.encoding.copy_(encoding)
+        else:
+            self.encoding.fill_(0.)
+            # Initialize attributes of this specific ship instance
+            self.set('player', player_number)
+            self.set('hull', int(template["Hull"]))
 
-        self.set("ship", 0.)
-        self.set("size", ArmadaDimensions.size_names.index(template['Size'].lower()))
-        idx, length = Ship.get_index("defense_tokens")
-        self.encoding[idx:idx + length] = 0.
-        for ttype in ArmadaTypes.defense_tokens:
-            tname = "Defense Token {}".format(ttype.capitalize())
-            token_idx = idx + ArmadaTypes.defense_tokens.index(ttype)
-            if tname in template:
-                self.encoding[token_idx] = int(template[tname])
+            self.set("ship", 0.)
+            self.set("size", ArmadaDimensions.size_names.index(template['Size'].lower()))
+            idx, length = Ship.get_index("defense_tokens")
+            self.encoding[idx:idx + length] = 0.
+            for ttype in ArmadaTypes.defense_tokens:
+                tname = "Defense Token {}".format(ttype.capitalize())
+                token_idx = idx + ArmadaTypes.defense_tokens.index(ttype)
+                if tname in template:
+                    if 0 == len(template[tname]):
+                        self.encoding[token_idx] = 0
+                    else:
+                        self.encoding[token_idx] = int(template[tname])
 
-        # Max shields (current shields will be filled in the reset function)
-        idx = Ship.get_index("max_shields")[0]
-        for zone in ['left', 'right', 'front', 'rear']:
-            name = "Shields {}".format(zone.capitalize())
-            self.encoding[idx + ArmadaTypes.hull_zones.index(zone)] = int(template[name])
-        if 'Huge' == template['Size']:
-            for zone in ['left-auxiliary', 'right-auxiliary']:
-                name = "Shields {} {}".format(zone.capitalize())
+            # Max shields (current shields will be filled in the reset function)
+            idx = Ship.get_index("max_shields")[0]
+            for zone in ['left', 'right', 'front', 'rear']:
+                name = "Shields {}".format(zone.capitalize())
                 self.encoding[idx + ArmadaTypes.hull_zones.index(zone)] = int(template[name])
+            if 'Huge' == template['Size']:
+                for zone in ['left-auxiliary', 'right-auxiliary']:
+                    name = "Shields {} {}".format(zone.capitalize())
+                    self.encoding[idx + ArmadaTypes.hull_zones.index(zone)] = int(template[name])
 
-        # Presence of hull zones/firing arcs
-        idx, length = Ship.get_index("hull_zones")
-        self.encoding[idx:idx + length] = 0.
-        # Set the hull zones to indicate which are present
-        idx = Ship.get_index("hull_zones")[0]
-        for zone in ['left', 'right', 'front', 'rear']:
-            self.encoding[idx + ArmadaTypes.hull_zones.index(zone)] = 1.
-        if 'Huge' == template['Size']:
-            for zone in ['left-auxiliary', 'right-auxiliary']:
+            # Presence of hull zones/firing arcs
+            idx, length = Ship.get_index("hull_zones")
+            self.encoding[idx:idx + length] = 0.
+            # Set the hull zones to indicate which are present
+            idx = Ship.get_index("hull_zones")[0]
+            for zone in ['left', 'right', 'front', 'rear']:
                 self.encoding[idx + ArmadaTypes.hull_zones.index(zone)] = 1.
+            if 'Huge' == template['Size']:
+                for zone in ['left-auxiliary', 'right-auxiliary']:
+                    self.encoding[idx + ArmadaTypes.hull_zones.index(zone)] = 1.
 
-        # Initialize the armaments
-        idx = Ship.get_index("dice")[0]
-        for i, zone in enumerate(['left', 'right', 'front', 'rear']):
-            for j, color in enumerate(ArmadaDice.die_colors):
-                name = "Armament {} {}".format(zone.capitalize(), color.capitalize())
-                hull_offset = ArmadaTypes.hull_zones.index(zone)
-                if 0 < len(template[name]):
-                    number = int(template[name])
-                else:
-                    number = 0
-                self.encoding[idx + hull_offset * len(ArmadaDice.die_colors) + j] = number
-        
-        if 'Huge' == template['Size']:
-            for i, zone in enumerate(['left-auxiliary', 'right-auxiliary']):
+            # Initialize the armaments
+            idx = Ship.get_index("dice")[0]
+            for i, zone in enumerate(['left', 'right', 'front', 'rear']):
                 for j, color in enumerate(ArmadaDice.die_colors):
                     name = "Armament {} {}".format(zone.capitalize(), color.capitalize())
                     hull_offset = ArmadaTypes.hull_zones.index(zone)
-                    number = int(template[name])
+                    if 0 < len(template[name]):
+                        number = int(template[name])
+                    else:
+                        number = 0
                     self.encoding[idx + hull_offset * len(ArmadaDice.die_colors) + j] = number
+            
+            if 'Huge' == template['Size']:
+                for i, zone in enumerate(['left-auxiliary', 'right-auxiliary']):
+                    for j, color in enumerate(ArmadaDice.die_colors):
+                        name = "Armament {} {}".format(zone.capitalize(), color.capitalize())
+                        hull_offset = ArmadaTypes.hull_zones.index(zone)
+                        number = int(template[name])
+                        self.encoding[idx + hull_offset * len(ArmadaDice.die_colors) + j] = number
 
         # TODO Check for legality and actually handle
+        self.width, self.height = ArmadaDimensions.ship_bases_feet[
+            ArmadaDimensions.size_names[int(self.get('size'))]]
         self.upgrades = upgrades
-        self.width, self.height = ArmadaDimensions.ship_bases_feet[template['Size'].lower()]
         self.reset()
 
     @staticmethod
@@ -121,64 +133,44 @@ class Ship:
         """Initialize the _enc_index and _enc_len variables."""
         Ship._enc_index = OrderedDict()
         Ship._enc_len = OrderedDict()
-        Ship._enc_index['player'] = 0
-        Ship._enc_len['player'] = 1
-        Ship._enc_index['hull'] = 1
-        Ship._enc_len['hull'] = 1
-        Ship._enc_index['damage'] = 2
-        Ship._enc_len['damage'] = 1
+
+        def addEntry(name, length, cur_idx):
+            Ship._enc_index[name] = cur_idx
+            Ship._enc_len[name] = length
+            return Ship._enc_index[name] + Ship._enc_len[name]
+
+        cur_idx = addEntry(name='player', length=1, cur_idx=0)
+        cur_idx = addEntry(name='hull', length=1, cur_idx=cur_idx)
+        cur_idx = addEntry(name='damage', length=1, cur_idx=cur_idx)
         # TODO Face up damage card effects
-        Ship._enc_index['speed'] = 3
-        Ship._enc_len['speed'] = 1
-        Ship._enc_index['ship'] = 4
-        Ship._enc_len['ship'] = 1
-        # Encode the size as a single value since different sizes are linearly related
-        Ship._enc_index['size'] = 5
-        Ship._enc_len['size'] = 1
-        # Defense tokens and state belong here, whether the token has been spend during this
+        cur_idx = addEntry(name='speed', length=1, cur_idx=cur_idx)
+        cur_idx = addEntry(name='ship', length=1, cur_idx=cur_idx)
+        cur_idx = addEntry(name='size', length=1, cur_idx=cur_idx)
+        # Defense tokens and state belong here, whether the token has been spent during this
         # attack step is stored in the attack state
-        # TODO FIXME Make this a loop starting with cur_idx:=6 and use a table of names and their
-        # lengths, this is too error prone.
-        Ship._enc_index['defense_tokens'] = 6
-        Ship._enc_len['defense_tokens'] = len(ArmadaTypes.defense_tokens)
-        cur_idx = Ship._enc_index['defense_tokens'] + Ship._enc_len['defense_tokens']
+        cur_idx = addEntry(name='defense_tokens', length=len(ArmadaTypes.defense_tokens), cur_idx=cur_idx)
 
-        Ship._enc_index['green_defense_tokens'] = cur_idx
-        Ship._enc_len['green_defense_tokens'] = len(ArmadaTypes.defense_tokens)
-        cur_idx = Ship._enc_index['green_defense_tokens'] + Ship._enc_len['green_defense_tokens']
+        cur_idx = addEntry(name='green_defense_tokens', length=len(ArmadaTypes.defense_tokens), cur_idx=cur_idx)
+        cur_idx = addEntry(name='red_defense_tokens', length=len(ArmadaTypes.defense_tokens), cur_idx=cur_idx)
 
-        Ship._enc_index['red_defense_tokens'] = cur_idx
-        Ship._enc_len['red_defense_tokens'] = len(ArmadaTypes.defense_tokens)
-        cur_idx = Ship._enc_index['red_defense_tokens'] + Ship._enc_len['red_defense_tokens']
+        cur_idx = addEntry(name='max_shields', length=len(ArmadaTypes.hull_zones), cur_idx=cur_idx)
 
-        Ship._enc_index['max_shields'] = cur_idx
-        Ship._enc_len['max_shields'] = len(ArmadaTypes.hull_zones)
-        cur_idx = Ship._enc_index['max_shields'] + Ship._enc_len['max_shields']
-
-        Ship._enc_index['shields'] = cur_idx
-        Ship._enc_len['shields'] = len(ArmadaTypes.hull_zones)
-        cur_idx = Ship._enc_index['shields'] + Ship._enc_len['shields']
+        cur_idx = addEntry(name='shields', length=len(ArmadaTypes.hull_zones), cur_idx=cur_idx)
 
         # Presence of particular hull zones
-        Ship._enc_index['hull_zones'] = cur_idx
-        Ship._enc_len['hull_zones'] = len(ArmadaTypes.hull_zones)
-        cur_idx = Ship._enc_index['hull_zones'] + Ship._enc_len['hull_zones']
+        cur_idx = addEntry(name='hull_zones', length=len(ArmadaTypes.hull_zones), cur_idx=cur_idx)
         # Armament for each zone
-        Ship._enc_index['dice'] = cur_idx
-        Ship._enc_len['dice'] = len(ArmadaTypes.hull_zones) * len(ArmadaDice.die_colors)
-        cur_idx = Ship._enc_index['dice'] + Ship._enc_len['dice']
+        cur_idx = addEntry(
+            name='dice',
+            length=len(ArmadaTypes.hull_zones) * len(ArmadaDice.die_colors), cur_idx=cur_idx)
         # TODO Line of sight marker locations and firing arc locations
         # TODO Upgrades
         # TODO Ignition arc
-        Ship._enc_index['commands'] = cur_idx
-        Ship._enc_len['commands'] = ArmadaTypes.max_command_dials
+        cur_idx = addEntry(name='commands', length=ArmadaTypes.max_command_dials, cur_idx=cur_idx)
         # Location is a pair of x and y coordinates in feet (since that is the range ruler size).
-        Ship._enc_index['location'] = cur_idx
-        Ship._enc_len['location'] = 2
-        cur_idx = Ship._enc_index['location'] + Ship._enc_len['location']
+        cur_idx = addEntry(name='location', length=2, cur_idx=cur_idx)
         # The heading is the clockwise rotation of the ship in radians
-        Ship._enc_index['heading'] = cur_idx
-        Ship._enc_len['heading'] = 1
+        cur_idx = addEntry(name='heading', length=1, cur_idx=cur_idx)
 
     @staticmethod
     def encodeSize():
@@ -402,7 +394,7 @@ class Ship:
     def shield_damage(self, zone, amount):
         """
         Deal damage to a hull zone but only deplete the shields, don't assign hull damage. Return
-        the amount of damage that will be assigned to the hull.
+        the amount of damage that is in excess of the shields.
 
         Args:
             zone (str): One of ArmadaTypes.hull_zones
@@ -410,16 +402,18 @@ class Ship:
         Returns:
             (int): Amount of damage that will be assigned to the hull.
         """
-        offset = Ship._enc_index['shields'] + ArmadaTypes.hull_zones.index(zone)
-        shields = int(self.encoding[offset].item())
-        if shields >= amount:
-            shields -= amount
-            self.encoding[offset] = shields
-            return 0
-        else:
-            amount -= shields
-            self.encoding[offset] = 0.
-            return amount
+        damage = amount
+        if "hull" != zone:
+            shield_offset = Ship._enc_index['shields'] + ArmadaTypes.hull_zones.index(zone)
+            shields = int(self.encoding[shield_offset].item())
+            if shields >= damage:
+                shields -= damage
+                damage = 0
+            else:
+                damage -= shields
+                shields = 0
+            self.encoding[shield_offset] = shields
+        return damage
 
     def damage(self, zone, amount):
         """
@@ -429,21 +423,18 @@ class Ship:
             zone (str): One of ArmadaTypes.hull_zones or "hull"
             amount (int): Amount of damage
         """
-        damage_offset = Ship._enc_index['damage']
-        damage = int(self.encoding[damage_offset].item())
-        if "hull" == zone:
-            damage += amount
-        else:
+        damage = amount
+        if "hull" != zone:
             shield_offset = Ship._enc_index['shields'] + ArmadaTypes.hull_zones.index(zone)
             shields = int(self.encoding[shield_offset].item())
-            if shields >= amount:
-                shields -= amount
+            if shields >= damage:
+                shields -= damage
+                damage = 0
             else:
-                amount -= shields
+                damage -= shields
                 shields = 0
-                damage += amount
             self.encoding[shield_offset] = shields
-        self.encoding[damage_offset] = damage
+        self.set('damage', self.get('damage') + damage)
 
     def hull(self):
         hull_offset = Ship._enc_index['hull']
@@ -451,9 +442,7 @@ class Ship:
         return hull
 
     def damage_cards(self):
-        damage_offset = Ship._enc_index['damage']
-        damage = int(self.encoding[damage_offset].item())
-        return damage
+        return int(self.get('damage'))
 
     def stringify(self):
         """Return a string version of the ship."""
@@ -468,7 +457,7 @@ class Ship:
         red_tokens = self.encoding[red_def_idx:red_def_idx + red_def_len]
         return str(
             "{}: hull ({}/{}), shields {}, green defense tokens {}, red defense tokens {}".format(
-                self.name, self.damage_cards(), self.hull(), shields, green_tokens, red_tokens))
+                self.name, self.hull()-self.damage_cards(), self.hull(), shields, green_tokens, red_tokens))
 
     def __str__(self):
         return self.stringify()

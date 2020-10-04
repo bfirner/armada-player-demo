@@ -16,6 +16,10 @@ class ArmadaDice:
                                "hit_hit": hit_hit,
                                "hit_crit": hit_crit,
                                "blank": blank}
+    unique_faces = {
+        "red": ['hit', 'crit', 'accuracy', 'hit_hit', 'blank'],
+        "blue": ['hit', 'crit', 'accuracy'],
+        "black": ['hit', 'hit_crit', 'blank']}
 
     face_to_damage = { "hit": 1,
                        "crit": 1,

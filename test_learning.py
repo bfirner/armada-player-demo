@@ -17,12 +17,12 @@ import pytest
 import random
 import torch
 
-import ship
 import utility
 from armada_encodings import (Encodings)
 from game_constants import (ArmadaPhases, ArmadaTypes)
 from random_action_dataset import (RandomActionDataset)
 from random_agent import (RandomAgent)
+from ship import (Ship)
 from world_state import (AttackState, WorldState)
 
 # Initialize ships from the test ship list
@@ -58,7 +58,7 @@ def update_lifetime_network(lifenet, batch, labels, optimizer, eval_only=False):
     with torch.no_grad():
         errors = (prediction - labels).abs()
         for i in range(errors.size(0)):
-            if errors[i] > 1000 or errors[i] != errors[i]:
+            if errors[i] > 1000 or errors[i] != errors[i] or i == 1:
                 # This is messy debugging code, but sometimes a test may fail after bug
                 # introductions so it is helpful to leave this in to speed up debugging.
                 world_size = Encodings.calculateWorldStateSize()
@@ -78,6 +78,16 @@ def update_lifetime_network(lifenet, batch, labels, optimizer, eval_only=False):
                     print(f"\tspend defense token encoding is {action_encoding}")
                 else:
                     print("Cannot print information about {}".format(sub_phase_name))
+                attacker = Ship(name="Attacker", player_number=1,
+                                     encoding=attack_state_encoding[:Ship.encodeSize()])
+                defender = Ship(name="Defender", player_number=1,
+                                     encoding=attack_state_encoding[Ship.encodeSize():2 * Ship.encodeSize()])
+                # print(f"\tAttack state encoding is {attack_state_encoding}")
+                print("\tAttacker is {}".format(attacker))
+                print("\tDefender is {}".format(defender))
+                # TODO FIXME Need to examine the dice pools, ships never get blown up
+                dice_encoding = attack_state_encoding[Encodings.getAttackDiceOffset():]
+                print("\tDice are {}".format(dice_encoding))
                 print(f"\tLabel is {labels[i]}")
 
 
@@ -117,7 +127,7 @@ def create_attack_effects_dataset():
     torch.backends.cudnn.benchmark = False
     phase = "attack - resolve attack effects"
     train_dataloader = torch.utils.data.DataLoader(
-            dataset=RandomActionDataset(subphase=phase, num_samples=2000, batch_size=32), batch_size=None, shuffle=False,
+            dataset=RandomActionDataset(subphase=phase, num_samples=100, batch_size=32), batch_size=None, shuffle=False,
             sampler=None, batch_sampler=None, num_workers=10, pin_memory=True, drop_last=False,
             multiprocessing_context=None)
     eval_dataloader = torch.utils.data.DataLoader(
@@ -142,7 +152,7 @@ def create_spend_defense_tokens_dataset():
     torch.backends.cudnn.benchmark = False
     phase = "attack - spend defense tokens"
     train_dataloader = torch.utils.data.DataLoader(
-            dataset=RandomActionDataset(subphase=phase, num_samples=5000, batch_size=32, deterministic=True),
+            dataset=RandomActionDataset(subphase=phase, num_samples=100, batch_size=32, deterministic=True),
             batch_size=None, shuffle=False,
             sampler=None, batch_sampler=None, num_workers=10, pin_memory=True, drop_last=False,
             multiprocessing_context=None)
@@ -167,17 +177,17 @@ def create_nonrandom_training_dataset():
     torch.manual_seed(0)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-    # TODO FIXME See all RNGs so that tests cannot fail intermittently
+    # TODO FIXME Seed all RNGs so that tests cannot fail intermittently
 
     # TODO FIXME Remember to seed the regular Python RNG as well
     agent = SimpleAgent()
 
-    attacker = ship.Ship(name="Attacker", template=ship_templates["Attacker"], upgrades=[], player_number=1)
+    attacker = Ship(name="Attacker", template=ship_templates["Attacker"], upgrades=[], player_number=1)
 
-    no_brace = ship.Ship(name="No Defense Tokens", template=ship_templates["No Defense Tokens"], upgrades=[], player_number=2)
-    one_brace = ship.Ship(name="Single Brace", template=ship_templates["Single Brace"], upgrades=[], player_number=2)
-    two_brace = ship.Ship(name="Double Brace", template=ship_templates["Double Brace"], upgrades=[], player_number=2)
-    all_tokens = ship.Ship(name="All Tokens", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
+    no_brace = Ship(name="No Defense Tokens", template=ship_templates["No Defense Tokens"], upgrades=[], player_number=2)
+    one_brace = Ship(name="Single Brace", template=ship_templates["Single Brace"], upgrades=[], player_number=2)
+    two_brace = Ship(name="Double Brace", template=ship_templates["Double Brace"], upgrades=[], player_number=2)
+    all_tokens = Ship(name="All Tokens", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
 
     # Generate 100 trials per pairing to compensate for the natural variability in rolls
     processes = []
@@ -362,8 +372,8 @@ def test_resolve_attack_effects_model(resolve_attack_effects_model):
     # Create a state from resolve attack effects and an empty action.
     world_state = WorldState()
     world_state.round = 1
-    ship_a = ship.Ship(name="Ship A", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=1)
-    ship_b = ship.Ship(name="Ship B", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
+    ship_a = Ship(name="Ship A", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=1)
+    ship_b = Ship(name="Ship B", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
     world_state.addShip(ship_a, 0)
     world_state.addShip(ship_b, 1)
     pool_colors, pool_faces = ['black'] * 4, ['hit_crit'] * 4
@@ -373,7 +383,7 @@ def test_resolve_attack_effects_model(resolve_attack_effects_model):
     world_state.updateAttack(attack)
     action_encoding = torch.cat((Encodings.encodeWorldState(world_state),
                                  Encodings.encodeAction(world_state.sub_phase, None)))
-    state_encoding, die_slots = Encodings.encodeAttackState(world_state)
+    state_encoding = Encodings.encodeAttackState(world_state)
     batch[0] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
@@ -383,7 +393,7 @@ def test_resolve_attack_effects_model(resolve_attack_effects_model):
     world_state.updateAttack(attack)
     action_encoding = torch.cat((Encodings.encodeWorldState(world_state),
                                  Encodings.encodeAction(world_state.sub_phase, None)))
-    state_encoding, die_slots = Encodings.encodeAttackState(world_state)
+    state_encoding = Encodings.encodeAttackState(world_state)
     batch[1] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
@@ -392,7 +402,7 @@ def test_resolve_attack_effects_model(resolve_attack_effects_model):
     world_state.setPhase("ship phase", "attack - resolve attack effects")
     attack = AttackState('short', ship_a, 'left', ship_b, 'front', pool_colors, pool_faces)
     world_state.updateAttack(attack)
-    state_encoding, die_slots = Encodings.encodeAttackState(world_state)
+    state_encoding = Encodings.encodeAttackState(world_state)
     batch[2] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
@@ -401,11 +411,12 @@ def test_resolve_attack_effects_model(resolve_attack_effects_model):
     world_state.setPhase("ship phase", "attack - resolve attack effects")
     attack = AttackState('long', ship_a, 'front', ship_b, 'front', pool_colors, pool_faces)
     world_state.updateAttack(attack)
-    state_encoding, die_slots = Encodings.encodeAttackState(world_state)
+    state_encoding = Encodings.encodeAttackState(world_state)
     batch[3] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
     lifetime_out = network(batch[:4])
+    print("super cool attack effects round estimates are {}".format(lifetime_out[:4]))
 
     # The lifetimes should go up sequentially with the above scenarios
     #print("Lifetimes from A are {}".format(lifetime_out))
@@ -447,8 +458,8 @@ def test_defense_tokens_model(spend_defense_tokens_model):
     # Ideally 1.1 and 2.1 would predict the current round.
     world_state = WorldState()
     world_state.round = 1
-    ship_a = ship.Ship(name="Ship A", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=1)
-    ship_b = ship.Ship(name="Ship B", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
+    ship_a = Ship(name="Ship A", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=1)
+    ship_b = Ship(name="Ship B", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
     world_state.addShip(ship_a, 0)
     world_state.addShip(ship_b, 1)
     pool_colors, pool_faces = ['black'] * 4, ['hit_crit'] * 4
@@ -461,7 +472,7 @@ def test_defense_tokens_model(spend_defense_tokens_model):
     world_state.updateAttack(attack)
     action_encoding = torch.cat((Encodings.encodeWorldState(world_state),
                                  Encodings.encodeAction(world_state.sub_phase, None)))
-    state_encoding, die_slots = Encodings.encodeAttackState(world_state)
+    state_encoding = Encodings.encodeAttackState(world_state)
     batch[0] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
@@ -469,14 +480,14 @@ def test_defense_tokens_model(spend_defense_tokens_model):
     #world_state.attack.defender_spend_token('brace', green)
     action_encoding = torch.cat((Encodings.encodeWorldState(world_state),
                                  Encodings.encodeAction(world_state.sub_phase, action)))
-    state_encoding, die_slots = Encodings.encodeAttackState(world_state)
+    state_encoding = Encodings.encodeAttackState(world_state)
     batch[1] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
     world_state = WorldState()
     world_state.round = 1
-    ship_a = ship.Ship(name="Ship A", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=1)
-    ship_b = ship.Ship(name="Ship B", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
+    ship_a = Ship(name="Ship A", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=1)
+    ship_b = Ship(name="Ship B", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
     world_state.addShip(ship_a, 0)
     world_state.addShip(ship_b, 1)
     pool_colors, pool_faces = ['black'] * 4, ['hit_crit'] * 2 + ['hit'] * 2
@@ -491,7 +502,7 @@ def test_defense_tokens_model(spend_defense_tokens_model):
     action = [("redirect", (ArmadaTypes.green, [('left', 4)]))]
     action_encoding = torch.cat((Encodings.encodeWorldState(world_state),
                                  Encodings.encodeAction(world_state.sub_phase, action)))
-    state_encoding, die_slots = Encodings.encodeAttackState(world_state)
+    state_encoding = Encodings.encodeAttackState(world_state)
     batch[2] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 

@@ -15,8 +15,6 @@ class Encodings():
 
     # Make some constants here to avoid magic numbers in the rest of this code
     max_defense_tokens = ArmadaTypes.max_defense_tokens
-    hot_die_size = 9
-    max_die_slots = 16
 
     def encodeShip(ship, encoding):
         """
@@ -32,6 +30,37 @@ class Encodings():
         offset = Ship.encodeSize()
 
         return offset
+
+    @staticmethod
+    def dieEncodingSize():
+        """
+        Return the space taken to encode a dice pool.
+        """
+        # Avoid hard-coding this so that if the ArmadaDice file is modified this gets the update
+        # automatically, but also avoid doing this for loop over and over by memoizing the result.
+        if not hasattr(Encodings, '_die_encoding_size'):
+            Encodings._die_encoding_size = sum(
+                [len(ArmadaDice.unique_faces[entry]) for entry in ArmadaDice.unique_faces.keys()])
+        return Encodings._die_encoding_size
+
+    @staticmethod
+    def dieOffset(color, face):
+        """
+        Get the die offset (for example in the evade section of the spend defense tokens encoding or
+        in the dice pool of the attack state)
+
+        Arguments:
+            color (str): Color of the die.
+            face  (str): Face on the die.
+        """
+        face_offset = 0
+        for color_key, face_list in ArmadaDice.unique_faces.items():
+            if color_key != color:
+                face_offset += len(face_list)
+            else:
+                face_offset += face_list.index(face)
+                break
+        return face_offset
 
     def calculateAttackSize():
         attack_enc_size = 0
@@ -51,11 +80,9 @@ class Encodings():
         # attack range - 3 (1-hot encoding)
         attack_enc_size += len(ArmadaTypes.ranges)
         #
-        # We have a couple of options for the dice pool.
-        # The simplest approach is to over-provision a vector with say 16 dice. There would be 3
-        # color vectors and 6 face vectors for a total of 9*16=144 inputs.
-        # 16 * [ color - 3, face - 6]
-        attack_enc_size += Encodings.max_die_slots * Encodings.hot_die_size
+        # The dice pool is a vector with space for all possible die faces with a value indicating
+        # how many times each of those faces appear.
+        attack_enc_size += Encodings.dieEncodingSize()
 
         return attack_enc_size
 
@@ -94,25 +121,6 @@ class Encodings():
         # Assign back to the given section
         section[0:] = new_section
 
-    def inPlaceUnmap(encoding, die_slots):
-        """Unmap the random slot arrangement done for training.
-
-        This should be used for human consumption since the shuffling is only required to remove
-        positional bias before creating training data for a network.
-
-        Args:
-            encoding (torch.Tensor): The encoding
-            die_slots (List[int])  : Die slot mapping (source to encoding index)
-        Returns:
-            (torch.Tensor)         : Encoding of the world state with original orderings.
-        """
-        # Unshuffle the dice
-        dice_begin = Encodings.getAttackDiceOffset()
-        dice_end = dice_begin + Encodings.hot_die_size * Encodings.max_die_slots
-        Encodings.unmapSection(section=encoding[dice_begin:dice_end], slice_size=Encodings.hot_die_size, slots=die_slots)
-
-        return encoding
-
     def encodeAttackState(world_state, encoding=None):
         """
         Args:
@@ -121,7 +129,6 @@ class Encodings():
                                        if encoding is not provided.
         Returns:
             (torch.Tensor)           : Encoding of the world state used as network input.
-            (List[int])              : Die slot mapping (source to encoding index)
         """
         attack_enc_size = Encodings.calculateAttackSize()
         if encoding is None:
@@ -151,26 +158,19 @@ class Encodings():
             encoding[cur_offset + offset] = 1 if arange == attack.range else 0
         cur_offset += len(ArmadaTypes.ranges)
 
-        # Each die will be represented with a hot_die_size vector
-        # There are max_die_slots slots for these, and we will fill them in randomly
-        # During training we want the model to react properly to a die in any location in the
-        # vector, so we randomize the dice locations so that the entire vector is used (otherwise
-        # the model would be poorly trained for rolls with a very large number of dice)
-        die_slots = random.sample(range(Encodings.max_die_slots), len(attack.pool_colors))
-        for die_idx, slot in enumerate(die_slots):
-            slot_offset = cur_offset + slot * Encodings.hot_die_size
-            # Encode die colors
-            color = attack.pool_colors[die_idx]
-            encoding[slot_offset + ArmadaDice.die_colors.index(color)] = 1
-            slot_offset += len(ArmadaDice.die_colors)
-            # Encode die faces
-            face = attack.pool_faces[die_idx]
-            encoding[slot_offset + ArmadaDice.die_faces.index(face)] = 1
+        # Dice are encoded into a vector with a value for each kind of die face (e.g. red hit hit,
+        # black blank, blue accuracy, etc). This is sufficient for the model to provide feedback for
+        # the dice pool.
+        for color, face in zip(attack.pool_colors, attack.pool_faces):
+            face_offset = Encodings.dieOffset(color=color, face=face)
+            encoding[cur_offset + face_offset] += 1
+
+        cur_offset += Encodings.dieEncodingSize()
 
         # Sanity check on the encoding size and the data put into it
-        assert encoding.size(0) == cur_offset + Encodings.hot_die_size * Encodings.max_die_slots
+        assert encoding.size(0) == cur_offset
 
-        return encoding, die_slots
+        return encoding
 
     def calculateSpendDefenseTokensSize():
         def_token_size = 0
@@ -178,7 +178,7 @@ class Encodings():
         # Index of the token to spend with an output for no token
         def_token_size += 2 * len(ArmadaTypes.defense_tokens)
         # For evade target(s)
-        def_token_size += Encodings.max_die_slots
+        def_token_size += Encodings.dieEncodingSize()
         # For redirect target(s). The value in an index is the redirect amount
         def_token_size += len(ArmadaTypes.hull_zones)
 
@@ -259,8 +259,9 @@ class Encodings():
             # Manipulate dice in the dice pool. Every ability or action that can occur needs to have
             # an encoding here.
             # TODO For now just handle spending accuracy icons. 
-            # Each die could be an accuracy and could target any red or green token.
-            return Encodings.max_die_slots + 2 * len(ArmadaTypes.defense_tokens)
+            # Select the die to use from all of the dice
+            # TODO This is overkill, only two kinds of unique faces are accuracy (blue or red)
+            return Encodings.dieEncodingSize() + 2 * len(ArmadaTypes.defense_tokens)
             
         elif "attack - spend defense tokens" == subphase:
             # The defender spends tokens to modify damage or the dice pool. There are also other
@@ -270,15 +271,8 @@ class Encodings():
             # The "evade" targets one (or more) of the attackers dice.
             # The "redirect" token targets one (or more with certain upgrades) hull zones.
             # TODO Just covering tokens for now.
+            return Encodings.calculateSpendDefenseTokensSize()
 
-            # The encoding begins with which types of tokens were spent (including red or green
-            # state).
-            token_size = 2 * len(ArmadaTypes.defense_tokens)
-            # Evade indicates which dice were affected
-            evade_size = Encodings.max_die_slots
-            # Redirect indicates which hull zones were affected and the amount to redirect
-            redirect_size = len(ArmadaTypes.hull_zones) + 1
-            return token_size + evade_size + redirect_size
         else:
             raise NotImplementedError(
                 "Encoding for attack phase {} not implemented.".format(subphase))
@@ -311,13 +305,13 @@ class Encodings():
                 return encoding
             action = action_list[0]
             if "accuracy" == action:
-                token_begin = Encodings.max_die_slots
+                token_begin = Encodings.dieEncodingSize()
                 for acc_action in action_list[1]:
                     die_index, token_index, color = acc_action
                     # Mark the token and spent die
                     encoding[die_index] = 1.
-                    token_begin = token_index + color * len(ArmadaTypes.defense_tokens) + token_index
-                    encoding[token_begin] += 1.
+                    token_offset = color * len(ArmadaTypes.defense_tokens) + token_index
+                    encoding[token_begin + token_offset] += 1.
             else:
                 raise NotImplementedError(
                     "Action {} unimplemented for attack phase {}.".format(action, subphase))
@@ -334,8 +328,8 @@ class Encodings():
             if action_list is not None:
                 for action_tuple in action_list:
                     # Offsets used during encodings
-                    evade_offset = len(ArmadaTypes.defense_tokens) + ArmadaTypes.max_defense_tokens
-                    redirect_offset = evade_offset + Encodings.max_die_slots
+                    evade_offset = Encodings.getSpendDefenseTokensEvadeOffset()
+                    redirect_offset = Encodings.getSpendDefenseTokensRedirectOffset()
 
                     action = action_tuple[0]
                     action_args = action_tuple[1]

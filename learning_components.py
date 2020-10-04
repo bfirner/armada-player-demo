@@ -31,7 +31,8 @@ def a_vs_b(ship_a, ship_b, agent_a, agent_b, ship_a_hull, trials, attack_range):
         world_state = WorldState()
         world_state.addShip(ship_a, 0)
         world_state.addShip(ship_b, 1)
-        world_state.round += 1
+        # Start at a random round to avoid biasing network with the round number.
+        world_state.round += random.randint(1, ArmadaPhases.max_rounds)
         # Don't attempt forever in the case of some catastrophic reoccurring error.
         attempts = 0
         while ship_b.damage_cards() < ship_b.hull() and world_state.round <= ArmadaPhases.max_rounds:
@@ -60,10 +61,10 @@ def get_n_examples(n_examples, ship_a, ship_b, agent):
     This function is meant to be called in parallel to more quickly create training data.
 
     Arguments:
-        n_examples (int)     : The number of examples to generate.
-        ship_a (Ship)        : The attacking ship.
-        ship_b (Ship)        : The defending ship.
-        agent (LearningAgent): The agent to choose actions.
+        n_examples (int)       : The number of examples to generate.
+        ship_a (Ship or [Ship]): The attacking ship (or multiple possibilities).
+        ship_b (Ship or [Ship]): The defending ship (or multiple possibilities).
+        agent (LearningAgent)  : The agent to choose actions.
     Return:
         List[examples]       : List of the examples world states and actions.
     """
@@ -76,8 +77,15 @@ def get_n_examples(n_examples, ship_a, ship_b, agent):
             hull = random.choice(['left', 'right', 'front', 'rear'])
         else:
             hull = 'front'
+        attacker = ship_a
+        defender = ship_b
+        # Allow multiple possible attackers and defenders
+        if type(attacker) is list:
+            attacker = random.choice(attacker)
+        if type(defender) is list:
+            defender = random.choice(defender)
         attacks.append(
-            a_vs_b(ship_a=ship_a, ship_b=ship_b, agent_a=agent, agent_b=agent,
+            a_vs_b(ship_a=attacker, ship_b=defender, agent_a=agent, agent_b=agent,
                    ship_a_hull=hull, trials=1, attack_range=attack_range))
     return attacks
 
@@ -155,10 +163,12 @@ def collect_attack_batches(batch, labels, attacks, subphase):
                 Encodings.encodeAction(subphase=selected[0].sub_phase,
                                        action_list=selected[1],
                                        encoding=batch[cur_sample,world_size:world_size + action_size])
-                _, die_slots = Encodings.encodeAttackState(world_state=selected[0],
-                                                           encoding=batch[cur_sample,world_size + action_size:])
+                Encodings.encodeAttackState(world_state=selected[0],
+                                            encoding=batch[cur_sample,world_size + action_size:])
                 cur_sample += 1
                 attack_count = 0
+                # Don't sample from this sequence again even if there are extra cleanup events.
+                break
             # When a full batch is collected return it immediately.
             if cur_sample == batch_size:
                 yield(cur_sample)

@@ -38,11 +38,18 @@ class RandomActionDataset(torch.utils.data.IterableDataset):
         # Variables for data generation
         self.randagent = RandomAgent()
         keys, ship_templates = parseShips('data/test_ships.csv')
-
-        self.ship_a = Ship(name="Ship A", template=ship_templates["All Defense Tokens"],
-                           upgrades=[], player_number=1, device='cpu')
-        self.ship_b = Ship(name="Ship B", template=ship_templates["All Defense Tokens"],
-                           upgrades=[], player_number=2, device='cpu')
+     
+        training_ships = ["All Defense Tokens", "All Defense Tokens",
+                          "Imperial II-class Star Destroyer", "MC80 Command Cruiser",
+                          "Assault Frigate Mark II A"]
+        self.defenders = []
+        self.attackers = []
+        for name in training_ships:
+            self.attackers.append(Ship(name=name, template=ship_templates[name],
+                                  upgrades=[], player_number=1, device='cpu'))
+        for name in training_ships:
+            self.defenders.append(Ship(name=name, template=ship_templates[name],
+                                  upgrades=[], player_number=2, device='cpu'))
         # We'll generate the samples in the iterator function so that it is done in parallel.
         # TODO FIXME If deterministic is true then generate everything a single time here to save time.
 
@@ -50,14 +57,13 @@ class RandomActionDataset(torch.utils.data.IterableDataset):
     def __iter__(self):
         """Get a data iterator."""
         worker_info = torch.utils.data.get_worker_info()
-        iter_begin = 0
-        iter_end = self.num_samples
+        desired_samples = self.num_samples
         # Different sampling behavior for single thread and multi-thread data loading
         if worker_info is not None:
-            iter_end = self.num_samples // worker_info.num_workers
+            desired_samples = self.num_samples // worker_info.num_workers
             # The first worker will fetch any remainder
             if 1 == worker_info.id:
-                iter_end += self.num_samples % worker_info.num_workers
+                desired_samples += self.num_samples % desired_samples
             if self.deterministic:
                 torch.manual_seed(worker_info.id)
                 random.seed(worker_info.id)
@@ -68,14 +74,13 @@ class RandomActionDataset(torch.utils.data.IterableDataset):
             torch.manual_seed(16)
             random.seed(16)
         #TODO generate a sample and yield it
-        samples = get_n_examples(n_examples=iter_end - iter_begin, ship_a=self.ship_a,
-                                 ship_b=self.ship_b, agent=self.randagent)
+        samples = get_n_examples(n_examples=desired_samples, ship_a=self.attackers,
+                                 ship_b=self.defenders, agent=self.randagent)
         # This will collect just one example per scenario, which should ensure no bias in the
         # samples that would result in biased learning.
         num_collected = 0
         batch = torch.zeros(self.batch_size, self.input_size)
         labels = torch.zeros(self.batch_size, 1)
-        last_nsamples = 1
         for nsamples in collect_attack_batches(batch, labels, samples[num_collected:], self.subphase):
             num_collected += nsamples
             # Return if there is no more data.
