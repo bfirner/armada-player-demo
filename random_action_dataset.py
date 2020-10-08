@@ -29,10 +29,6 @@ class RandomActionDataset(torch.utils.data.IterableDataset):
         self.subphase = subphase
         self.num_samples = num_samples
         self.batch_size = batch_size
-        world_size = Encodings.calculateWorldStateSize()
-        action_size = Encodings.calculateActionSize(self.subphase)
-        attack_size = Encodings.calculateAttackSize()
-        self.input_size = world_size + action_size + attack_size
         self.deterministic = deterministic
 
         # Variables for data generation
@@ -41,7 +37,8 @@ class RandomActionDataset(torch.utils.data.IterableDataset):
      
         training_ships = ["All Defense Tokens", "All Defense Tokens",
                           "Imperial II-class Star Destroyer", "MC80 Command Cruiser",
-                          "Assault Frigate Mark II A"]
+                          "Assault Frigate Mark II A", "No Shield Ship", "One Shield Ship",
+                          "Mega Die Ship"]
         self.defenders = []
         self.attackers = []
         for name in training_ships:
@@ -63,7 +60,7 @@ class RandomActionDataset(torch.utils.data.IterableDataset):
             desired_samples = self.num_samples // worker_info.num_workers
             # The first worker will fetch any remainder
             if 1 == worker_info.id:
-                desired_samples += self.num_samples % desired_samples
+                desired_samples += self.num_samples - desired_samples * worker_info.num_workers
             if self.deterministic:
                 torch.manual_seed(worker_info.id)
                 random.seed(worker_info.id)
@@ -73,20 +70,11 @@ class RandomActionDataset(torch.utils.data.IterableDataset):
         elif self.deterministic:
             torch.manual_seed(16)
             random.seed(16)
-        #TODO generate a sample and yield it
+        # Generate the training data
         samples = get_n_examples(n_examples=desired_samples, ship_a=self.attackers,
                                  ship_b=self.defenders, agent=self.randagent)
         # This will collect just one example per scenario, which should ensure no bias in the
         # samples that would result in biased learning.
         num_collected = 0
-        batch = torch.zeros(self.batch_size, self.input_size)
-        labels = torch.zeros(self.batch_size, 1)
-        for nsamples in collect_attack_batches(batch, labels, samples[num_collected:], self.subphase):
-            num_collected += nsamples
-            # Return if there is no more data.
-            if 0 == num_collected:
-                return
-            yield((batch[:nsamples], labels[:nsamples]))
-            # Return if the requested amount of data has already been generated.
-            if num_collected >= len(samples):
-                return
+        # TODO FIXME HERE Yield an iterator, not the samples
+        return collect_attack_batches(batch_size=self.batch_size, attacks=samples, subphase=self.subphase)

@@ -90,7 +90,7 @@ def get_n_examples(n_examples, ship_a, ship_b, agent):
     return attacks
 
 
-def collect_attack_batches(batch, labels, attacks, subphase):
+def collect_attack_batches(batch_size, attacks, subphase):
     """A generator to collect training batches from a list of attack logs.
 
     Collect all of the actions taken during the resolve attack effects stage of a trial and
@@ -100,16 +100,23 @@ def collect_attack_batches(batch, labels, attacks, subphase):
     unlikely dice roll or combination of shields and hull in the defending ship).
 
     Args:
-        batch (torch.Tensor)        : Training tensor to fill. First dimension is the batch size.
-        labels (torch.Tensor)       : Labels tensor. First dimension must match the batch argument.
+        batch_size (tuple)          : Maximum batch size.
         attacks (List[List[tuples]]): Each sublist is all of the states and actions from a sequence.
         subphase (str)              : Name of the subphase where state/action pairs are collected.
     Returns:
         Number of items filled.
     """
+    # TODO FIXME This function can be used as an dataset iterator for a multithreaded dataloader so
+    # the batch and labels should not be passed in. Instead this function must create new tensors
+    # for each batch.
+    world_size = Encodings.calculateWorldStateSize()
+    action_size = Encodings.calculateActionSize(subphase)
+    attack_size = Encodings.calculateAttackSize()
+    input_size = world_size + action_size + attack_size
+    batch = torch.zeros(batch_size, input_size)
+    labels = torch.zeros(batch_size, 1)
+
     # Variables for collection
-    batch_size = batch.size(0)
-    target_device = batch.device
     # collect_state records what we are doing inside of the sample loop
     collect_state = 0
     # The state and (state, action) pairs collected from the current trial
@@ -119,26 +126,16 @@ def collect_attack_batches(batch, labels, attacks, subphase):
     attack_count = 0
     cur_sample = 0
     last_round = 0
-    # Initialize buffers to 0
-    batch.fill_(0.)
-    labels.fill_(0.)
     for sequence in attacks:
+        # We only collect a single sample per sequence. Collect all of the state action pairs of
+        # interest first and then select a single one to use.
+        state_action_pairs = []
         for attack in sequence:
             if 'state' == attack[0]:
                 last_round = attack[1].round
-                if attack[1].sub_phase == "attack - declare":
-                    # If we are transitioning into a new attack then increase the attack counter.
-                    attack_count += 1
                 if attack[1].sub_phase == subphase:
                     last_state = attack[1]
                     collect_state = 1
-                elif ArmadaPhases.max_rounds < last_round:
-                    # The trial has completed.
-                    collect_state = 3
-                elif (attack[1].sub_phase == "attack - resolve damage" and
-                        attack[1].attack.defender.damage_cards() >= attack[1].attack.defender.hull()):
-                    # The trial has completed.
-                    collect_state = 3
                 else:
                     # Not in the desired subphase and the attack trial is not complete.
                     # Waiting for the next attack in the trial or for the trial to end.
@@ -147,33 +144,31 @@ def collect_attack_batches(batch, labels, attacks, subphase):
                 # Collect the actions associated with last_state. The attack count will later be
                 # corrected to be the number of total attacks from that state rather than the current
                 # attack.
-                state_actions_attacks.append((last_state, attack[1], attack_count))
-            # Choose a training sample and calculate attacks.
-            if 3 == collect_state and 0 < len(state_actions_attacks):
-                # Collect a single sample
-                selected = random.choice(state_actions_attacks)
-                state_actions_attacks = []
-                # The training label is the final round where the ship was destroyed, or 7 if the ship
-                # was not destroyed in the 6 game rounds.
-                labels[cur_sample] = last_round
-                world_size = Encodings.calculateWorldStateSize()
-                action_size = Encodings.calculateActionSize(selected[0].sub_phase)
-                attack_size = Encodings.calculateAttackSize()
-                Encodings.encodeWorldState(world_state=selected[0], encoding=batch[cur_sample,:world_size])
-                Encodings.encodeAction(subphase=selected[0].sub_phase,
-                                       action_list=selected[1],
-                                       encoding=batch[cur_sample,world_size:world_size + action_size])
-                Encodings.encodeAttackState(world_state=selected[0],
-                                            encoding=batch[cur_sample,world_size + action_size:])
-                cur_sample += 1
-                attack_count = 0
-                # Don't sample from this sequence again even if there are extra cleanup events.
-                break
-            # When a full batch is collected return it immediately.
-            if cur_sample == batch_size:
-                yield(cur_sample)
-                cur_sample = 0
+                state_action_pairs.append((last_state, attack[1]))
+        # Collect a single sample (as long as one was present)
+        if 0 < len(state_action_pairs):
+            selected = random.choice(state_action_pairs)
+            # The training label is the final round where the ship was destroyed, or 7 if the ship
+            # was not destroyed in the 6 game rounds.
+            labels[cur_sample] = last_round
+            world_size = Encodings.calculateWorldStateSize()
+            action_size = Encodings.calculateActionSize(selected[0].sub_phase)
+            attack_size = Encodings.calculateAttackSize()
+            Encodings.encodeWorldState(world_state=selected[0], encoding=batch[cur_sample,:world_size])
+            Encodings.encodeAction(subphase=selected[0].sub_phase,
+                                   action_list=selected[1],
+                                   encoding=batch[cur_sample,world_size:world_size + action_size])
+            Encodings.encodeAttackState(world_state=selected[0],
+                                        encoding=batch[cur_sample,world_size + action_size:])
+            cur_sample += 1
+        # When a full batch is collected return it immediately.
+        if cur_sample == batch_size:
+            yield((batch[:cur_sample], labels[:cur_sample]))
+            # Make new buffers to store training data
+            batch = torch.zeros(batch_size, input_size)
+            labels = torch.zeros(batch_size, 1)
+            cur_sample = 0
             
     # If there are leftover samples that did not fill a batch still return them.
     if 0 < cur_sample:
-        return cur_sample
+        yield((batch[:cur_sample], labels[:cur_sample]))

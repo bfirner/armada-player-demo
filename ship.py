@@ -283,7 +283,7 @@ class Ship:
         if 1 == length:
             return self.encoding[index].item()
         else:
-            raise RuntimeError("Use Ship.get_range for single element data.")
+            raise RuntimeError("Use Ship.get_range for multi-element data.")
 
 
     def get_range(self, name):

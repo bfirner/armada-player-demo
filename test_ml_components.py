@@ -90,7 +90,7 @@ def test_get_training_examples():
     eval_dataloader = torch.utils.data.DataLoader(
             dataset=RandomActionDataset(subphase=phase, num_samples=100, batch_size=batch_size,
                                         deterministic=True),
-            batch_size=batch_size, shuffle=False,
+            batch_size=None, shuffle=False,
             sampler=None, batch_sampler=None, num_workers=2, pin_memory=True,
             drop_last=False, timeout=0, multiprocessing_context=None)
 
@@ -105,6 +105,33 @@ def test_get_training_examples():
     for batch in eval_dataloader:
         assert torch.equal(first_tensor, batch[0][0])
         break
+
+
+def test_die_encodings():
+    """Test the dice are encoded correctly in the attack state."""
+
+    agent = RandomAgent()
+    attacker = ship.Ship(name="Attacker", template=ship_templates["Attacker"], upgrades=[], player_number=1)
+    template_front_dice = 0
+    for color in ['Red', 'Blue', 'Black']:
+        if 0 < len(ship_templates["Attacker"][f"Armament Front {color}"]):
+            template_front_dice += int(ship_templates["Attacker"][f"Armament Front {color}"])
+
+    dice_begin = ArmadaTypes.hull_zones.index('front') * len(ArmadaDice.die_colors)
+    dice_end = dice_begin + len(ArmadaDice.die_colors)
+    front_dice = int(attacker.get_range('dice')[dice_begin:dice_end].sum())
+    # The ship encoding should have the same dice as the template
+    assert front_dice == template_front_dice
+
+    defender = ship.Ship(name="Defender", template=ship_templates["All Defense Tokens"], upgrades=[], player_number=2)
+
+    encoding, world_state = make_encoding(attacker, defender, "short", agent)
+
+    attack_state_encoding = Encodings.encodeAttackState(world_state)
+    die_offset = Encodings.getAttackDiceOffset()
+    # The attack state should have a roll with as many dice as the ship has.
+    dice_encoding = attack_state_encoding[die_offset:die_offset + Encodings.dieEncodingSize()]
+    assert int(dice_encoding.sum().item()) == front_dice
 
 
 def test_token_encodings():
