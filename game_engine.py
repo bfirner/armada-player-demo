@@ -181,7 +181,6 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
         damage = damage // 2 + damage % 2
 
     world_state.setSubPhase("attack - resolve damage")
-    damage_cards = 0
     if defense_effects[ArmadaTypes.defense_tokens.index('redirect')]:
         # Redirect to the target hull zone(s), but don't redirect more damage than is present
         for redirect_hull, redirect_amount in redirects:
@@ -191,17 +190,18 @@ def handleAttack(world_state, attacker, defender, attack_range, offensive_agent,
             # This would be a weird thing to do, but technically you could redirect damage to the
             # hull if you want shields on the defending hull zone for some reason (or because you
             # are a random agent or dumb network doing something dumb).
-            damage_cards += defender[0].shield_damage(redirect_hull, redirect_amount)
-            # Reduce the damage left
+            # TODO FIXME Handle criticals and the contain token
+            defender[0].damage(redirect_hull, redirect_amount)
+            # Reduce the damage that was redirected
             damage = damage - redirect_amount
 
     # Deal remaining damage to the shield in the defending hull zone
-    damage_cards += defender[0].shield_damage(attack.defending_hull, damage)
     # TODO FIXME Handle criticals and the contain token
-    defender[0].damage(attack.defending_hull, damage_cards)
+    defender[0].damage(attack.defending_hull, damage)
+    #damage_cards += defender[0].shield_damage(attack.defending_hull, damage)
+    #defender[0].damage(attack.defending_hull, damage_cards)
     # TODO FIXME HERE Logging
     #world_state.attack['{} damage'.format(defender[1])] = damage
-
 
     # Log the final attack state if the log is present
     if state_log is not None:

@@ -121,12 +121,12 @@ class Ship:
                         hull_offset = ArmadaTypes.hull_zones.index(zone)
                         number = int(template[name])
                         self.encoding[idx + hull_offset * len(ArmadaDice.die_colors) + j] = number
+            self.reset()
 
         # TODO Check for legality and actually handle
         self.width, self.height = ArmadaDimensions.ship_bases_feet[
             ArmadaDimensions.size_names[int(self.get('size'))]]
         self.upgrades = upgrades
-        self.reset()
 
     @staticmethod
     def _initialize_encoding():
@@ -434,6 +434,7 @@ class Ship:
                 damage -= shields
                 shields = 0
             self.encoding[shield_offset] = shields
+        # TODO FIXME This would be the correct time to handle the standard critical (or XX-9)
         self.set('damage', self.get('damage') + damage)
 
     def hull(self):

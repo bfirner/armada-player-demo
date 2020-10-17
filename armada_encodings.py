@@ -26,7 +26,7 @@ class Encodings():
         Returns:
             (offset slots): Offset into the tensor after the last element written.
         """
-        encoding[:Ship.encodeSize()] = ship.encoding
+        encoding[:Ship.encodeSize()].copy_(ship.encoding)
         offset = Ship.encodeSize()
 
         return offset
@@ -77,8 +77,8 @@ class Encodings():
         # Encode the dice pool and faces, defense tokens, shields, and hull.
         # The input is much simpler if it is of fixed size. The inputs are:
         #
-        # attack range - 3 (1-hot encoding)
-        attack_enc_size += len(ArmadaTypes.ranges)
+        # attack range (value from 0 to 2)
+        attack_enc_size += 1
         #
         # The dice pool is a vector with space for all possible die faces with a value indicating
         # how many times each of those faces appear.
@@ -87,12 +87,12 @@ class Encodings():
         return attack_enc_size
 
     def getAttackRangeOffset():
-        """Get the offset of the dice section of the attack state."""
+        """Get the offset of the range section of the attack state."""
         return 2 * Ship.encodeSize() + 3 * len(ArmadaTypes.defense_tokens)
 
     def getAttackDiceOffset():
         """Get the offset of the dice section of the attack state."""
-        return Encodings.getAttackRangeOffset() + len(ArmadaTypes.ranges)
+        return Encodings.getAttackRangeOffset() + 1
 
     def getAttackTokenOffset():
         """Get the offset the of defense token section of the attack state."""
@@ -153,10 +153,9 @@ class Encodings():
             attack.spent_types)
         cur_offset += len(ArmadaTypes.defense_tokens)
 
-        # Attack range
-        for offset, arange in enumerate(ArmadaTypes.ranges):
-            encoding[cur_offset + offset] = 1 if arange == attack.range else 0
-        cur_offset += len(ArmadaTypes.ranges)
+        # Encode the attack range
+        encoding[cur_offset] = ArmadaTypes.ranges.index(attack.range)
+        cur_offset += 1
 
         # Dice are encoded into a vector with a value for each kind of die face (e.g. red hit hit,
         # black blank, blue accuracy, etc). This is sufficient for the model to provide feedback for

@@ -58,35 +58,39 @@ def update_lifetime_network(lifenet, batch, labels, optimizer, eval_only=False):
     with torch.no_grad():
         errors = (prediction - labels).abs()
         for i in range(errors.size(0)):
-            if errors[i] > 1000 or errors[i] != errors[i] or i == 1:
+            # Debug on crazy errors or nan values.
+            if errors[i] > 1000 or errors[i] != errors[i]:
                 # This is messy debugging code, but sometimes a test may fail after bug
                 # introductions so it is helpful to leave this in to speed up debugging.
                 world_size = Encodings.calculateWorldStateSize()
                 world_encoding = batch[i,:world_size]
                 phase_name = ArmadaPhases.main_phases[int(world_encoding[1].item())]
                 sub_phase_name = ArmadaPhases.sub_phases[phase_name][int(world_encoding[2].item())]
+                print(f"Error {i} is {errors[i]}")
+                print(f"\tRound {world_encoding[0].item()}")
+                print(f"\tSubphase {sub_phase_name}")
                 action_size = Encodings.calculateActionSize(sub_phase_name)
                 attack_size = Encodings.calculateAttackSize()
                 action_encoding = batch[i,world_size:world_size + action_size]
                 attack_state_encoding = batch[i,world_size + action_size:]
-                print(f"Error {i} is {errors[i]}")
-                print(f"\tRound {world_encoding[0].item()}")
-                print(f"\tSubphase {sub_phase_name}")
                 if "attack - resolve attack effects" == sub_phase_name:
                     print(f"\tattack effect encoding is {action_encoding}")
                 elif "attack - spend defense tokens" == sub_phase_name:
                     print(f"\tspend defense token encoding is {action_encoding}")
                 else:
                     print("Cannot print information about {}".format(sub_phase_name))
-                attacker = Ship(name="Attacker", player_number=1,
-                                     encoding=attack_state_encoding[:Ship.encodeSize()])
                 defender = Ship(name="Defender", player_number=1,
-                                     encoding=attack_state_encoding[Ship.encodeSize():2 * Ship.encodeSize()])
+                                encoding=attack_state_encoding[:Ship.encodeSize()])
+                attacker = Ship(name="Attacker", player_number=1,
+                                encoding=attack_state_encoding[Ship.encodeSize():2 * Ship.encodeSize()])
                 # print(f"\tAttack state encoding is {attack_state_encoding}")
                 print("\tAttacker is {}".format(attacker))
                 print("\tDefender is {}".format(defender))
-                # TODO FIXME Need to examine the dice pools, ships never get blown up
-                dice_encoding = attack_state_encoding[Encodings.getAttackDiceOffset():]
+                # TODO FIXME Enough dice in a pool seems to end a ship, but unless the pools are
+                # incredibly large this doesn't seem to be happening. Damage does not seem to be
+                # accumlating between rounds.
+                die_offset = Encodings.getAttackDiceOffset()
+                dice_encoding = attack_state_encoding[die_offset:die_offset + Encodings.dieEncodingSize()]
                 print("\tDice are {}".format(dice_encoding))
                 print(f"\tLabel is {labels[i]}")
 
@@ -127,7 +131,7 @@ def create_attack_effects_dataset():
     torch.backends.cudnn.benchmark = False
     phase = "attack - resolve attack effects"
     train_dataloader = torch.utils.data.DataLoader(
-            dataset=RandomActionDataset(subphase=phase, num_samples=100, batch_size=32), batch_size=None, shuffle=False,
+            dataset=RandomActionDataset(subphase=phase, num_samples=500, batch_size=32), batch_size=None, shuffle=False,
             sampler=None, batch_sampler=None, num_workers=10, pin_memory=True, drop_last=False,
             multiprocessing_context=None)
     eval_dataloader = torch.utils.data.DataLoader(
@@ -152,7 +156,7 @@ def create_spend_defense_tokens_dataset():
     torch.backends.cudnn.benchmark = False
     phase = "attack - spend defense tokens"
     train_dataloader = torch.utils.data.DataLoader(
-            dataset=RandomActionDataset(subphase=phase, num_samples=100, batch_size=32, deterministic=True),
+            dataset=RandomActionDataset(subphase=phase, num_samples=500, batch_size=32, deterministic=True),
             batch_size=None, shuffle=False,
             sampler=None, batch_sampler=None, num_workers=10, pin_memory=True, drop_last=False,
             multiprocessing_context=None)
@@ -359,16 +363,23 @@ def test_resolve_attack_effects_model(resolve_attack_effects_model):
     attack_size = Encodings.calculateAttackSize()
     input_size = world_size + action_size + attack_size
 
-    target_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    batch_size = 32
-    batch = torch.Tensor(batch_size, input_size).to(target_device)
-
     # First verify that errors decreased during training.
     # print("Errors for A were {}".format(errors))
     print("Eval errors for A were {}".format(eval_errors))
     assert eval_errors[0] > eval_errors[-1]
 
     # Let's examine predictions for different ranges and hull zones.
+    target_device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    batch_size = 4
+    batch = torch.Tensor(batch_size, input_size).to(target_device)
+
+    # Let's examine predictions for different dice pools and spent defense tokens.
+    # Go through the following scenarios:
+    # 1.1 An attack upon a ship with only 1 hull remaining
+    # 1.2 The same dice pool but on a ship with full hull
+    # 1.3 A dice pool with only blank dice
+    # 1.4 A dice pool with only blanks when attacking at long range.
+
     # Create a state from resolve attack effects and an empty action.
     world_state = WorldState()
     world_state.round = 1
@@ -378,7 +389,7 @@ def test_resolve_attack_effects_model(resolve_attack_effects_model):
     world_state.addShip(ship_b, 1)
     pool_colors, pool_faces = ['black'] * 4, ['hit_crit'] * 4
     world_state.setPhase("ship phase", "attack - resolve attack effects")
-    ship_b._hull = 1
+    ship_b.set('damage', ship_b.get('hull') - 1)
     attack = AttackState('short', ship_a, 'left', ship_b, 'front', pool_colors, pool_faces)
     world_state.updateAttack(attack)
     action_encoding = torch.cat((Encodings.encodeWorldState(world_state),
@@ -388,7 +399,7 @@ def test_resolve_attack_effects_model(resolve_attack_effects_model):
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
     # Same dice pool but the defender has full hull
-    ship_b._hull = 5
+    ship_b.set('damage', 0)
     attack = AttackState('short', ship_a, 'left', ship_b, 'front', pool_colors, pool_faces)
     world_state.updateAttack(attack)
     action_encoding = torch.cat((Encodings.encodeWorldState(world_state),
@@ -409,19 +420,23 @@ def test_resolve_attack_effects_model(resolve_attack_effects_model):
     # Full hull, all blanks, firing at red range
     pool_colors, pool_faces = ['red'] * 2, ['blank'] * 2
     world_state.setPhase("ship phase", "attack - resolve attack effects")
-    attack = AttackState('long', ship_a, 'front', ship_b, 'front', pool_colors, pool_faces)
+    attack = AttackState('long', ship_a, 'left', ship_b, 'front', pool_colors, pool_faces)
     world_state.updateAttack(attack)
     state_encoding = Encodings.encodeAttackState(world_state)
     batch[3] = torch.cat(
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
-    lifetime_out = network(batch[:4])
-    print("super cool attack effects round estimates are {}".format(lifetime_out[:4]))
+    lifetime_out = network(batch)
+    print("super cool attack effects round estimates are {}".format(lifetime_out))
 
-    # The lifetimes should go up sequentially with the above scenarios
-    #print("Lifetimes from A are {}".format(lifetime_out))
-    for i in range(3):
-        assert(lifetime_out[i].item() < lifetime_out[i+1].item())
+    # The lifetimes should go up sequentially with the above scenarios.
+    # However if the ship won't be destroyed the NN can't make an accurate relative number so be
+    # lenient once lifetimes go above round 6. The first scenario should result in destruction
+    # however.
+    assert(lifetime_out[0].item() < 6)
+    for i in range(batch.size(0) - 1):
+        assert(lifetime_out[i].item() < lifetime_out[i+1].item() or 
+                (lifetime_out[i].item() > 6. and lifetime_out[i+1].item() > 6.))
 
 
 def test_defense_tokens_model(spend_defense_tokens_model):
@@ -450,7 +465,7 @@ def test_defense_tokens_model(spend_defense_tokens_model):
     # Go through the following scenarios:
     # 1.1 An attack with more than enough damage to destroy the ship
     # 1.2 The same attack but a brace that would prevent destruction
-    # 1.3 The same attack but an redirect that would prevent destruction
+    # 1.3 The same attack but a redirect that would prevent destruction
     # Result: 1.1 should have lower lifetime than 1.2 and 1.3
     # 2.1 An attack that can barely destroy the ship
     # 2.2 An attack that barely will not destroy the ship
@@ -477,7 +492,6 @@ def test_defense_tokens_model(spend_defense_tokens_model):
         (action_encoding.to(target_device), state_encoding.to(target_device)))
 
     action = [("brace", (ArmadaTypes.green, None))]
-    #world_state.attack.defender_spend_token('brace', green)
     action_encoding = torch.cat((Encodings.encodeWorldState(world_state),
                                  Encodings.encodeAction(world_state.sub_phase, action)))
     state_encoding = Encodings.encodeAttackState(world_state)

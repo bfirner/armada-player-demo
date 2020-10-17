@@ -31,25 +31,25 @@ def a_vs_b(ship_a, ship_b, agent_a, agent_b, ship_a_hull, trials, attack_range):
         world_state = WorldState()
         world_state.addShip(ship_a, 0)
         world_state.addShip(ship_b, 1)
-        # Start at a random round to avoid biasing network with the round number.
-        world_state.round += random.randint(1, ArmadaPhases.max_rounds)
+        # Begin at round 1
+        world_state.round = 1
         # Don't attempt forever in the case of some catastrophic reoccurring error.
         attempts = 0
         while ship_b.damage_cards() < ship_b.hull() and world_state.round <= ArmadaPhases.max_rounds:
             attempts += 1
             # Handle the attack and receive the updated world state
-            try:
-                world_state = handleAttack(world_state=world_state, attacker=(ship_a, ship_a_hull),
-                                           defender=(ship_b, "front"), attack_range=attack_range,
-                                           offensive_agent=agent_a, defensive_agent=agent_b,
-                                           state_log=state_log)
-                # Record the final state with the incremented round number.
-                world_state.setPhase("status phase", "increment round number")
-                world_state.round += 1
-                state_log.append(('state', world_state.clone()))
-            except RuntimeError as err:
-                # This is fine, the random agent will do illegal things plenty of times
-                pass
+            #try:
+            world_state = handleAttack(world_state=world_state, attacker=(ship_a, ship_a_hull),
+                                       defender=(ship_b, "front"), attack_range=attack_range,
+                                       offensive_agent=agent_a, defensive_agent=agent_b,
+                                       state_log=state_log)
+            # Record the final state with the incremented round number.
+            world_state.setPhase("status phase", "increment round number")
+            world_state.round += 1
+            state_log.append(('state', world_state.clone()))
+            #except RuntimeError as err:
+            #    # This is fine, the random agent will do illegal things plenty of times
+            #    pass
         if 250 == attempts:
             raise RuntimeError("Too many failures for ship firing simulation.")
     return state_log
