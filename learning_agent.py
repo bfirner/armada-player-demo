@@ -96,7 +96,7 @@ class LearningAgent(BaseAgent):
             # Return no action
             return []
         # Encode the state, forward through the network, decode the result, and return the result.
-        as_enc, die_slots = Encodings.encodeAttackState(world_state)
+        as_enc = Encodings.encodeAttackState(world_state)
         as_enc = as_enc.to(self.device)
         if not self.model.with_novelty:
             # Forward through the policy net randomly, otherwise return random actions

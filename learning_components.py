@@ -100,11 +100,11 @@ def collect_attack_batches(batch_size, attacks, subphase):
     unlikely dice roll or combination of shields and hull in the defending ship).
 
     Args:
-        batch_size (tuple)          : Maximum batch size.
+        batch_size (int)            : Maximum batch size.
         attacks (List[List[tuples]]): Each sublist is all of the states and actions from a sequence.
         subphase (str)              : Name of the subphase where state/action pairs are collected.
     Returns:
-        Number of items filled.
+        (batch, labels) : Tuple of the batch and labels.
     """
     # TODO FIXME This function can be used as an dataset iterator for a multithreaded dataloader so
     # the batch and labels should not be passed in. Instead this function must create new tensors

@@ -11,6 +11,110 @@ from torch import (nn)
 from armada_encodings import (Encodings)
 from learning_agent import (LearningAgent)
 
+
+class SeparatePhaseModel(nn.Module):
+    """A class with a different model for each phase.
+
+    A more sophisticated model would have shared weights between different phases, so this model
+    should just be used for simple evaluations and experiments.
+    """
+
+    def __init__(self):
+        # There is a different model for each phase.
+        # Each model takes as input the world state and the attack state and output is the action
+
+        world_size = Encodings.calculateWorldStateSize()
+        attack_size = Encodings.calculateAttackSize()
+
+        nn.Module.__init__(self)
+        self.models = nn.ModuleDict()
+        self.optimizers = {}
+
+        # TODO FIXME Loop through all of the possible phases instead of just these two
+        for phase_name in ["attack - resolve attack effects", "attack - spend defense tokens"]:
+            action_size = Encodings.calculateActionSize(phase_name)
+            self.models[phase_name] = self.init_fc_params(world_size + attack_size, action_size)
+            self.optimizers[phase_name] = torch.optim.Adam(self.models[phase_name].parameters())
+
+        self.sm = nn.Softmax()
+
+    def get_optimizer(self, phase_name):
+        """
+        Gets an optimizer for one of the models.
+
+        Args:
+            phase_name (str): The name of the phase
+        Returns:
+            torch.optim
+        """
+        return self.optimizers[phase_name]
+
+    def load(self, filename):
+        """
+        Loads parameters from an existing file with model weights.
+
+        Args:
+            filename (str): Path to a file with model weights
+        Raises:
+            RuntimeError: If the file does not exist or has weight that that don't match this model.
+        """
+        params = torch.load(filename)
+        for phase_name in self.optimizers.keys():
+            self.models[phase_name].load_state_dict(params[phase_name])
+            self.optimizers[phase_name].load_state_dict(params[f"{phase_name}_optimizer"])
+
+    def save(self, filename):
+        """
+        Saves parameters from the current models into the provided filename.
+
+        Args:
+            filename (str): Path to the file.
+        """
+        # TODO clean up
+        states = {}
+        for phase_name in self.optimizers.keys():
+            states[phase_name] = self.models[phase_name].state_dict()
+            states[f"{phase_name}_optimizer"] = self.optimizers[phase_name].state_dict()
+
+        torch.save(states, filename)
+
+    def forward(self, phase_name, encoding):
+        """
+        Forwards the encoding through the model.
+
+        Args:
+            phase_name (str): The name of the model (.e.g. "def_tokens")
+            encoding (torch.tensor): An encoding of the current state
+        Returns:
+            action encoding
+        """
+        # Forward and return the results. The calling module will need to interpret them (e.g. by
+        # rounding off or finding a most likely choice)
+        x = self.models[phase_name].forward(encoding)
+        return x
+
+    def init_fc_params(self, input_size, output_size):
+        """
+        Initialize fully connected parameters for the given input and output sizes
+
+        Args:
+            filename (str): Path to a file with model weights
+        Raises:
+            RuntimeError: If the file does not exist or has weight that that don't match this model.
+        """
+        # Basic linear model
+        layers = nn.Sequential(
+                torch.nn.BatchNorm1d(input_size),
+                nn.Linear(input_size, 2 * input_size),
+                nn.ReLU(),
+                nn.Linear(2 * input_size, 4 * output_size),
+                nn.ReLU(),
+                nn.Linear(4 * output_size, 2 * output_size),
+                nn.ReLU(),
+                nn.Linear(2 * output_size, output_size),
+                )
+        return layers
+
 class ArmadaModel(nn.Module):
 
     def __init__(self, with_novelty=True):

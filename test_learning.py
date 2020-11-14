@@ -20,6 +20,9 @@ import torch
 import utility
 from armada_encodings import (Encodings)
 from game_constants import (ArmadaPhases, ArmadaTypes)
+from learning_agent import (LearningAgent)
+from learning_components import (collect_attack_batches, get_n_examples)
+from model import (SeparatePhaseModel)
 from random_action_dataset import (RandomActionDataset)
 from random_agent import (RandomAgent)
 from ship import (Ship)
@@ -219,7 +222,8 @@ def resolve_attack_effects_model(create_attack_effects_dataset):
     effects' phase. Also creates logs of training and evaluation loss.
 
     Returns:
-        (nn.module, list[int], list[int]): The model, training loss, and evaluation loss.
+        (nn.module, [float], [float]): The model, training errors per epoch, and eval errors per
+                                       epoch.
     """
     attacks, eval_attacks = create_attack_effects_dataset
 
@@ -292,7 +296,8 @@ def spend_defense_tokens_model(create_spend_defense_tokens_dataset):
     phase and during the 'resolve attack effects' phase.
 
     Returns:
-        (nn.module, nn.module,): The 'resolve attack effects' and 'spend defense tokens' models.
+        (nn.module, [float], [float]): The model, training errors per epoch, and eval errors per
+                                       epoch.
     """
     attacks, eval_attacks = create_spend_defense_tokens_dataset
 
@@ -348,6 +353,96 @@ def spend_defense_tokens_model(create_spend_defense_tokens_dataset):
                                                        eval_labels, None, True))
 
     return network, errors, eval_errors
+
+
+def test_policy_learning(spend_defense_tokens_model, resolve_attack_effects_model):
+    """Train a model to produce a better than random choice policy for defense tokens.
+
+    The spend_defense_tokens_model will be used to determine the quality of this network's output.
+    There will not be an update step as in reinforcement learning, this is just testing the
+    mechanism.
+
+    Returns:
+        (nn.module, nn.module,): The 'resolve attack effects' and 'spend defense tokens' models.
+    """
+    def_tokens_model, errors, eval_errors = spend_defense_tokens_model
+    def_tokens_model.eval()
+    res_attack_model, errors, eval_errors = resolve_attack_effects_model
+    res_attack_model.eval()
+    prediction_models = {
+        "attack - spend defense tokens": def_tokens_model.eval(),
+        "attack - resolve attack effects": res_attack_model.eval()
+    }
+    # Do the training. Use the prediction model lifetime to create the loss target. The loss
+    # will be the difference between the max possible round and the predicted round.
+    # For the defense token model the higher round is better, for the attack effect model a
+    # lower round is better.
+    loss_fn = {
+        "attack - spend defense tokens": lambda predictions: 7.0 - predictions,
+        "attack - resolve attack effects": lambda predictions: predictions - 1.
+    }
+
+    # Generate a new learning model
+    learning_agent = LearningAgent(SeparatePhaseModel())
+    # TODO FIXME The learning agent doesn't really have a training mode
+    learning_agent.model.train()
+    random_agent = RandomAgent()
+
+    training_ships = ["All Defense Tokens", "All Defense Tokens",
+                      "Imperial II-class Star Destroyer", "MC80 Command Cruiser",
+                      "Assault Frigate Mark II A", "No Shield Ship", "One Shield Ship",
+                      "Mega Die Ship"]
+    defenders = []
+    attackers = []
+    for name in training_ships:
+        attackers.append(Ship(name=name, template=ship_templates[name],
+                              upgrades=[], player_number=1, device='cpu'))
+    for name in training_ships:
+        defenders.append(Ship(name=name, template=ship_templates[name],
+                              upgrades=[], player_number=2, device='cpu'))
+
+    batch_size = 32
+    # Remember the training loss values to test for improvement
+    losses = {}
+    for subphase in ["attack - spend defense tokens", "attack - resolve attack effects"]:
+        losses[subphase] = []
+    # This gets samples to use for training. We will use a random agent to generate the states.
+    # In reinforcement learning the agent would alternate between random actions and actions
+    # from the learning agent to balance exploration of the state space with exploitation of
+    # learned behavior.
+    samples = get_n_examples(
+        n_examples=1000, ship_a=attackers, ship_b=defenders, agent=random_agent)
+
+    # Get a batch for each subphase
+    for subphase in ["attack - spend defense tokens", "attack - resolve attack effects"]:
+        # The learning_agent will take in the world state and attack state and will produce a new
+        # action encoding. Then the prediction network will take in a new tuple with this action and
+        # predict a final round. The difference between the random action and the final round with
+        # the network's action is the reward.
+        world_size = Encodings.calculateWorldStateSize()
+        action_size = Encodings.calculateActionSize(subphase)
+        attack_size = Encodings.calculateAttackSize()
+        for batch, lifetimes in collect_attack_batches(batch_size=batch_size, attacks=samples, subphase=subphase):
+            batch = batch.cuda()
+            # The learning agent takes in the world state along with the action as the input tensor.
+            new_batch = torch.cat((batch[:,:world_size], batch[:,world_size + action_size:]), dim=1).cuda()
+            # TODO FIXME Just make a forward function that takes in a phase name
+            new_actions = learning_agent.model.models[subphase](new_batch)
+            new_action_state = torch.cat((batch[:,:world_size], new_actions, batch[:,world_size + action_size:]), dim=1)
+            action_result = prediction_models[subphase](new_action_state)
+            loss = loss_fn[subphase](action_result)
+            learning_agent.model.get_optimizer(subphase).zero_grad()
+            loss.sum().backward()
+            learning_agent.model.get_optimizer(subphase).step()
+            with torch.no_grad():
+                losses[subphase].append(loss.mean().item())
+            # In reinforcement learning there would also be a phase where the prediction models are
+            # updated.
+    for subphase in ["attack - spend defense tokens", "attack - resolve attack effects"]:
+        print(f"losses for {subphase} start with {losses[subphase][0:5]} and end with {losses[subphase][-5:]}")
+        assert losses[subphase][-1] < losses[subphase][0]
+    # TODO FIXME HERE See if the policy networks produce better results than random actions
+    learning_agent.model.models.eval()
 
 
 def test_resolve_attack_effects_model(resolve_attack_effects_model):
